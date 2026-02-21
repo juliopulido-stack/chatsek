@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat SEK</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Jitsi Meet API -->
+    <script src='https://meet.jit.si/external_api.js'></script>
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="logo-container">
+                <i class="fas fa-comment-shield"></i>
+                <h1>Chat SEK</h1>
+                <p>Tu plataforma de mensajería privada</p>
+            </div>
+
+            <form id="login-form">
+                <div class="input-group">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="email" placeholder="Correo electrónico" required autocomplete="off">
+                </div>
+
+                <div class="input-group">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="password" placeholder="Contraseña" required>
+                </div>
+
+                <div id="error-message" class="error-message">Correo o contraseña incorrectos</div>
+
+                <div class="auth-buttons">
+                    <button type="submit" class="btn-login" id="btn-login">Entrar <i
+                            class="fas fa-arrow-right"></i></button>
+                    <!-- Registro público eliminado por seguridad -->
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Chat Screen -->
+    <div id="chat-screen" class="screen">
+        <div class="app-container">
+            <!-- Sidebar (Contacts) -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <div class="user-profile">
+                        <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil"
+                            id="my-profile-img">
+                        <span id="current-user-name">Usuario</span>
+                    </div>
+                    <div class="header-actions">
+                        <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
+                            title="Panel de Administración"></i>
+                        <i class="fas fa-circle-notch"></i>
+                        <i class="fas fa-message"></i>
+                        <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
+                    </div>
+                </div>
+
+                <div class="search-bar">
+                    <div class="search-input">
+                        <i class="fas fa-search"></i>
+                        <input type="text" placeholder="Busca un chat o inicia uno nuevo">
+                    </div>
+                </div>
+
+                <div class="contact-list" id="contact-list">
+                    <!-- Contacts will be loaded here dynamically by JS -->
+                </div>
+            </div>
+
+            <!-- Admin Panel Modal -->
+            <div id="admin-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Panel de Control - Usuarios</h2>
+                        <i class="fas fa-times" id="close-admin-modal"></i>
+                    </div>
+                    <div class="modal-body">
+                        <div class="admin-grid">
+                            <!-- Create/Edit User Form -->
+                            <div class="admin-card">
+                                <h3 id="admin-form-title">Crear Nuevo Usuario</h3>
+                                <form id="admin-create-user-form">
+                                    <input type="text" id="new-user-name" placeholder="Nombre completo" required>
+                                    <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
+                                    <div id="password-container">
+                                        <input type="password" id="new-user-password"
+                                            placeholder="Contraseña (solo para nuevos)" required>
+                                    </div>
+                                    <select id="new-user-role">
+                                        <option value="usuario">Usuario</option>
+                                        <option value="admin" id="opt-role-admin" style="display: none;">Admin</option>
+                                        <option value="super_admin" id="opt-role-superadmin" style="display: none;">
+                                            Super Admin</option>
+                                    </select>
+                                    <div class="form-actions" style="display: flex; gap: 10px;">
+                                        <button type="submit" class="btn-login" id="admin-form-submit">Registrar
+                                            Usuario</button>
+                                        <button type="button" class="btn-secondary" id="admin-form-cancel"
+                                            style="display: none;">Cancelar</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                        <!-- User List -->
+                        <div class="admin-card">
+                            <h3>Lista de Usuarios</h3>
+                            <div class="admin-user-list" id="admin-user-list">
+                                <!-- Dynamically loaded -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Main Chat Area -->
+            <div class="main-chat">
+                <!-- Chat Header -->
+                <div class="chat-header">
+                    <div class="chat-header-info">
+                        <img src="https://ui-avatars.com/api/?name=Contact" alt="Contact" id="active-contact-img">
+                        <div class="chat-header-text">
+                            <h2 id="active-contact-name">Selecciona un chat</h2>
+                            <span class="status">en línea</span>
+                        </div>
+                    </div>
+                    <div class="chat-header-actions">
+                        <i class="fas fa-video" id="btn-video-call" title="Videollamada"></i>
+                        <i class="fas fa-phone" id="btn-voice-call" title="Llamada de voz"></i>
+                        <i class="fas fa-search"></i>
+                        <i class="fas fa-ellipsis-v"></i>
+                    </div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div class="chat-messages" id="chat-messages">
+                    <div class="welcome-message" id="welcome-message">
+                        <i class="fas fa-shield-alt"></i>
+                        <h2>Chat SEK para Web</h2>
+                        <p>Envía y recibe mensajes con seguridad reforzada.</p>
+                    </div>
+                    <!-- Messages will appear here -->
+                </div>
+
+                <!-- Chat Input -->
+                <div class="chat-input-area" id="chat-input-area" style="display: none;">
+                    <i class="far fa-smile"></i>
+                    <i class="fas fa-paperclip"></i>
+                    <div class="input-container">
+                        <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
+                    </div>
+                    <i class="fas fa-microphone" id="voice-btn"></i>
+                    <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEK-Time Video Call Modal -->
+    <div id="call-modal" class="modal">
+        <div class="modal-content call-modal-content">
+            <div class="modal-header call-modal-header">
+                <div class="call-info">
+                    <i class="fas fa-video"></i>
+                    <h2 id="call-title">SEK-Time: Llamada en curso</h2>
+                </div>
+                <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
+            </div>
+            <div id="jitsi-container"></div>
+        </div>
+    </div>
+
+    <!-- Firebase v9 Compat Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
