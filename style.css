@@ -969,3 +969,15 @@ body {
     background-color: #e11d48;
     transform: scale(1.1) rotate(-15deg);
 }
+
+/* --- Version Label --- */
+.app-version {
+    position: fixed;
+    bottom: 15px;
+    right: 20px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 5000;
+}
