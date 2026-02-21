@@ -167,14 +167,16 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
 
     callModal.classList.add('active');
     incomingCallOverlay.classList.remove('active');
+    jitsiContainer.innerHTML = ''; // Clear previous calls
 
     // Show loader
-    jitsiContainer.innerHTML = `
-        <div id="jitsi-loader">
-            <div class="spinner"></div>
-            <p>Iniciando SEK-Time...</p>
-        </div>
-    `;
+    const loader = document.getElementById('jitsi-loader');
+    if (loader) loader.classList.remove('jitsi-hidden');
+
+    // Safety timeout: remove loader after 10s even if event fails
+    const loaderTimeout = setTimeout(() => {
+        if (loader) loader.classList.add('jitsi-hidden');
+    }, 10000);
 
     const domain = "meet.jit.si";
     const ids = [auth.currentUser.uid, targetUser.uid].sort();
@@ -190,42 +192,31 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
         },
         configOverwrite: {
             prejoinPageEnabled: false,
-            prejoinConfig: {
-                enabled: false,
-                hideDisplayName: true
-            },
+            prejoinConfig: { enabled: false },
             startWithAudioMuted: false,
             startWithVideoMuted: audioOnly,
             disableDeepLinking: true,
             enableWelcomePage: false,
-            enableClosePage: false,
-            requireDisplayName: false,
-            readOnlyName: true, // Prevent name editing/prompting
-            apiLogLevels: ['error']
+            enableClosePage: false
         },
         interfaceConfigOverwrite: {
             SHOW_JITSI_WATERMARK: false,
-            SHOW_WATERMARK_FOR_GUESTS: false,
             DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
             TOOLBAR_BUTTONS: [
                 'microphone', 'camera', 'desktop', 'fullscreen',
                 'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
-            ],
-            DISABLE_RINGING: true
+            ]
         }
     };
 
     jitsiApi = new JitsiMeetExternalAPI(domain, options);
 
-    // Explicitly set the name again after initialization
-    jitsiApi.executeCommand('displayName', currentUserData.name);
-
     jitsiApi.addEventListeners({
         readyToClose: endCall,
         videoConferenceLeft: endCall,
         videoConferenceJoined: () => {
-            const loader = document.getElementById('jitsi-loader');
-            if (loader) loader.remove();
+            clearTimeout(loaderTimeout);
+            if (loader) loader.classList.add('jitsi-hidden');
         }
     });
 
