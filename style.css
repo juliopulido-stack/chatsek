@@ -850,6 +850,13 @@ body {
     align-items: center;
     gap: 15px;
     color: var(--text-secondary);
+    z-index: 10;
+    transition: opacity 0.3s;
+}
+
+#jitsi-loader.jitsi-hidden {
+    display: none;
+    opacity: 0;
 }
 
 .spinner {
