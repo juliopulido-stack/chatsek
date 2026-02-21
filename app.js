@@ -25,6 +25,7 @@ let unsubscribeMessages = null;
 let unsubscribeUsers = null;
 let editingUserId = null;
 let jitsiApi = null;
+let processedCallIds = new Set(); // To avoid duplicate alerts
 
 // DOM Elements
 const loginScreen = document.getElementById('login-screen');
@@ -71,6 +72,14 @@ const btnVideoCall = document.getElementById('btn-video-call');
 const btnVoiceCall = document.getElementById('btn-voice-call');
 const btnEndCall = document.getElementById('btn-end-call');
 const jitsiContainer = document.getElementById('jitsi-container');
+
+// Incoming Call Elements
+const incomingCallOverlay = document.getElementById('incoming-call-overlay');
+const callerAvatar = document.getElementById('caller-avatar');
+const callerName = document.getElementById('caller-name');
+const callTypeText = document.getElementById('call-type-text');
+const btnAcceptCall = document.getElementById('btn-accept-call');
+const btnDeclineCall = document.getElementById('btn-decline-call');
 
 // --- Auth States ---
 
@@ -152,14 +161,15 @@ function showChatScreen() {
 btnVideoCall.addEventListener('click', () => startCall(false));
 btnVoiceCall.addEventListener('click', () => startCall(true));
 
-function startCall(audioOnly) {
-    if (!activeChatUser) return;
+function startCall(audioOnly, isReceiver = false, remoteUser = null) {
+    const targetUser = isReceiver ? remoteUser : activeChatUser;
+    if (!targetUser) return;
 
     callModal.classList.add('active');
+    incomingCallOverlay.classList.remove('active');
 
     const domain = "meet.jit.si";
-    // Unique room ID: SEK-Time-[alphabetical-pair-IDs]
-    const ids = [auth.currentUser.uid, activeChatUser.uid].sort();
+    const ids = [auth.currentUser.uid, targetUser.uid].sort();
     const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
 
     const options = {
@@ -173,17 +183,8 @@ function startCall(audioOnly) {
         configOverwrite: {
             startWithAudioMuted: false,
             startWithVideoMuted: audioOnly,
-            prejoinPageEnabled: false
-        },
-        interfaceConfigOverwrite: {
-            TOOLBAR_BUTTONS: [
-                'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
-                'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
-                'livestreaming', 'etherpad', 'sharedvideo', 'settings', 'raisehand',
-                'videoquality', 'filmstrip', 'invite', 'feedback', 'stats', 'shortcuts',
-                'tileview', 'videobackgroundblur', 'download', 'help', 'mute-everyone',
-                'security'
-            ],
+            prejoinPageEnabled: false,
+            disableDeepLinking: true
         }
     };
 
@@ -194,9 +195,10 @@ function startCall(audioOnly) {
         videoConferenceLeft: endCall
     });
 
-    // Send a message to the chat about the call
-    const type = audioOnly ? "Llamada de voz" : "Videollamada";
-    sendMessage(`📞 ${type} iniciada. Únete ahora.`);
+    if (!isReceiver) {
+        const type = audioOnly ? "Llamada de voz" : "Videollamada";
+        sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
+    }
 }
 
 function endCall() {
@@ -209,6 +211,36 @@ function endCall() {
 }
 
 btnEndCall.addEventListener('click', endCall);
+
+// --- Incoming Call UI ---
+
+function handleIncomingCall(msg) {
+    if (processedCallIds.has(msg.id)) return;
+    processedCallIds.add(msg.id);
+
+    const caller = allUsers.find(u => u.uid === msg.senderId);
+    if (!caller) return;
+
+    callerName.textContent = caller.name;
+    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(caller.name)}&background=random&color=fff&size=200`;
+    callTypeText.textContent = msg.audioOnly ? "Llamada de voz entrante..." : "Videollamada entrante...";
+
+    incomingCallOverlay.classList.add('active');
+
+    // Button handlers for this specific call
+    btnAcceptCall.onclick = () => {
+        startCall(msg.audioOnly || false, true, caller);
+    };
+
+    btnDeclineCall.onclick = () => {
+        incomingCallOverlay.classList.remove('active');
+    };
+
+    // Auto-close after 30 seconds if not answered
+    setTimeout(() => {
+        incomingCallOverlay.classList.remove('active');
+    }, 30000);
+}
 
 // --- Admin Panel Logic ---
 
@@ -349,7 +381,12 @@ adminCreateForm.addEventListener('submit', async (e) => {
         }
         resetAdminForm();
     } catch (e) {
-        alert("Error: " + e.message);
+        console.error("Error completo en Admin Panel:", e);
+        if (e.code === 'auth/too-many-requests') {
+            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
+        } else {
+            alert("Error: " + e.message);
+        }
     }
 });
 
@@ -398,6 +435,17 @@ function updateHeaderStatus() {
 function setupMessagesListener() {
     unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
         .onSnapshot((snapshot) => {
+            const newMessages = [];
+            snapshot.docChanges().forEach(change => {
+                if (change.type === "added") {
+                    const msg = { id: change.doc.id, ...change.doc.data() };
+                    // Detect Incoming Call
+                    if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
+                        handleIncomingCall(msg);
+                    }
+                }
+            });
+
             allMessages = [];
             snapshot.forEach((doc) => {
                 allMessages.push({ id: doc.id, ...doc.data() });
@@ -479,7 +527,17 @@ function renderMessages() {
         .forEach(msg => {
             const el = document.createElement('div');
             el.className = `message ${msg.senderId === auth.currentUser.uid ? 'sent' : 'received'}`;
-            el.innerHTML = `${msg.text}<span class="time">${msg.time}</span>`;
+            if (msg.type === 'call') {
+                el.innerHTML = `<i class="fas fa-video" style="margin-right:8px;"></i> ${msg.text}<span class="time">${msg.time}</span>`;
+                el.style.backgroundColor = 'var(--primary)';
+                el.style.cursor = 'pointer';
+                el.onclick = () => {
+                    const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
+                    startCall(msg.audioOnly || false, true, caller);
+                };
+            } else {
+                el.innerHTML = `${msg.text}<span class="time">${msg.time}</span>`;
+            }
             chatMessages.appendChild(el);
         });
     setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
@@ -488,7 +546,7 @@ function renderMessages() {
 sendBtn.addEventListener('click', () => sendMessage());
 messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-async function sendMessage(overrideText = null) {
+async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
     const text = overrideText || messageInput.value.trim();
     if (!text || !activeChatUser) return;
     const now = new Date();
@@ -499,6 +557,8 @@ async function sendMessage(overrideText = null) {
             senderId: auth.currentUser.uid,
             receiverId: activeChatUser.uid,
             text: text,
+            type: type,
+            audioOnly: audioOnly,
             time: time,
             timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });

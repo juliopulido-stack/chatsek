@@ -177,6 +177,25 @@
         </div>
     </div>
 
+    <!-- Incoming Call Overlay -->
+    <div id="incoming-call-overlay" class="calling-overlay">
+        <div class="calling-container">
+            <img src="" id="caller-avatar" class="caller-avatar" alt="Caller">
+            <div class="calling-text">
+                <h2 id="caller-name">Nombre</h2>
+                <p id="call-type-text">Videollamada entrante...</p>
+            </div>
+            <div class="calling-actions">
+                <button id="btn-accept-call" class="btn-call-action accept">
+                    <i class="fas fa-phone"></i>
+                </button>
+                <button id="btn-decline-call" class="btn-call-action decline">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Firebase v9 Compat Scripts -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
