@@ -190,22 +190,30 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
         },
         configOverwrite: {
             prejoinPageEnabled: false,
-            prejoinConfig: { enabled: false },
+            prejoinConfig: {
+                enabled: false,
+                hideDisplayName: true
+            },
             startWithAudioMuted: false,
             startWithVideoMuted: audioOnly,
             disableDeepLinking: true,
             enableWelcomePage: false,
             enableClosePage: false,
-            requireDisplayName: false
+            requireDisplayName: false,
+            apiLogLevels: ['error'],
+            doNotFlipLocalVideo: true,
+            hideConferenceTimer: true,
+            disableRemoteMute: true
         },
         interfaceConfigOverwrite: {
             SHOW_JITSI_WATERMARK: false,
             SHOW_WATERMARK_FOR_GUESTS: false,
-            DEFAULT_REMOTE_DISPLAY_NAME: 'Cargando...',
+            DEFAULT_REMOTE_DISPLAY_NAME: 'Chat SEK User',
             TOOLBAR_BUTTONS: [
                 'microphone', 'camera', 'desktop', 'fullscreen',
                 'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
             ],
+            DISABLE_RINGING: true
         }
     };
 
