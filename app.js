@@ -200,15 +200,13 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
             enableWelcomePage: false,
             enableClosePage: false,
             requireDisplayName: false,
-            apiLogLevels: ['error'],
-            doNotFlipLocalVideo: true,
-            hideConferenceTimer: true,
-            disableRemoteMute: true
+            readOnlyName: true, // Prevent name editing/prompting
+            apiLogLevels: ['error']
         },
         interfaceConfigOverwrite: {
             SHOW_JITSI_WATERMARK: false,
             SHOW_WATERMARK_FOR_GUESTS: false,
-            DEFAULT_REMOTE_DISPLAY_NAME: 'Chat SEK User',
+            DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
             TOOLBAR_BUTTONS: [
                 'microphone', 'camera', 'desktop', 'fullscreen',
                 'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
@@ -218,6 +216,9 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
     };
 
     jitsiApi = new JitsiMeetExternalAPI(domain, options);
+
+    // Explicitly set the name again after initialization
+    jitsiApi.executeCommand('displayName', currentUserData.name);
 
     jitsiApi.addEventListeners({
         readyToClose: endCall,
