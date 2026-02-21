@@ -168,6 +168,14 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
     callModal.classList.add('active');
     incomingCallOverlay.classList.remove('active');
 
+    // Show loader
+    jitsiContainer.innerHTML = `
+        <div id="jitsi-loader">
+            <div class="spinner"></div>
+            <p>Iniciando SEK-Time...</p>
+        </div>
+    `;
+
     const domain = "meet.jit.si";
     const ids = [auth.currentUser.uid, targetUser.uid].sort();
     const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
@@ -181,10 +189,23 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
             displayName: currentUserData.name
         },
         configOverwrite: {
+            prejoinPageEnabled: false,
+            prejoinConfig: { enabled: false },
             startWithAudioMuted: false,
             startWithVideoMuted: audioOnly,
-            prejoinPageEnabled: false,
-            disableDeepLinking: true
+            disableDeepLinking: true,
+            enableWelcomePage: false,
+            enableClosePage: false,
+            requireDisplayName: false
+        },
+        interfaceConfigOverwrite: {
+            SHOW_JITSI_WATERMARK: false,
+            SHOW_WATERMARK_FOR_GUESTS: false,
+            DEFAULT_REMOTE_DISPLAY_NAME: 'Cargando...',
+            TOOLBAR_BUTTONS: [
+                'microphone', 'camera', 'desktop', 'fullscreen',
+                'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
+            ],
         }
     };
 
@@ -192,7 +213,11 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
 
     jitsiApi.addEventListeners({
         readyToClose: endCall,
-        videoConferenceLeft: endCall
+        videoConferenceLeft: endCall,
+        videoConferenceJoined: () => {
+            const loader = document.getElementById('jitsi-loader');
+            if (loader) loader.remove();
+        }
     });
 
     if (!isReceiver) {
