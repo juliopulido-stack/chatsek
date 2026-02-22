@@ -223,20 +223,33 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 const reservedNumbers = {
-    "pablopulidonilson": "102948",
     "pablopulido": "102948",
+    "pablopulidonilson": "102948",
+    "pablo": "102948",
     "abuela": "582103",
     "gema": "739402",
+    "gemamaria": "739402",
     "alvaropulido": "294857",
+    "alvaro": "294857",
     "juliopuli": "110948",
+    "julio": "110948",
+    "juliopulido": "110948",
     "jggimenez": "647382",
     "fernandopulido": "384729",
-    "titamaribel": "928374"
+    "fernando": "384729",
+    "titamaribel": "928374",
+    "maribel": "928374"
 };
 
 async function generateUniquePhoneNumber(name = "") {
-    // Check if user has a reserved number
-    const cleanName = name.toLowerCase().replace(/\s/g, '');
+    // Thorough normalization: remove spaces, accents, and non-alphanumeric
+    const normalize = (str) => {
+        return str.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+            .replace(/[^a-z0-9]/g, ''); // alphanumeric only
+    };
+
+    const cleanName = normalize(name);
     if (reservedNumbers[cleanName]) {
         return reservedNumbers[cleanName];
     }
@@ -1158,7 +1171,7 @@ btnDialpadCall.addEventListener('click', async () => {
 
         if (entity) {
             dialpadModal.classList.remove('active');
-            openChatWith(entity);
+            startCall(false, false, entity); // Direct Call
         } else {
             dialpadError.textContent = "Error al abrir el chat";
         }
@@ -1248,5 +1261,76 @@ function renderDirectory(filter = "") {
         directoryList.appendChild(item);
     });
 }
+
+// --- WhatsApp Features (v2.17) ---
+const emojiBtn = document.getElementById('emoji-btn');
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+let emojiPicker = null;
+
+// --- Emoji Logic ---
+if (emojiBtn) {
+    emojiBtn.addEventListener('click', () => {
+        if (emojiPicker) {
+            emojiPicker.remove();
+            emojiPicker = null;
+            return;
+        }
+
+        emojiPicker = document.createElement('div');
+        emojiPicker.className = 'emoji-picker';
+
+        const emojis = ["😀", "😂", "🥰", "😍", "😎", "🤔", "😜", "😇", "🥳", "😭", "👍", "❤️", "🔥", "✨", "🙌", "🙏", "🚀", "🎉"];
+
+        emojis.forEach(emoji => {
+            const span = document.createElement('span');
+            span.className = 'emoji-item';
+            span.textContent = emoji;
+            span.onclick = () => {
+                messageInput.value += emoji;
+                messageInput.focus();
+                // Trigger input event to show send button if needed
+                messageInput.dispatchEvent(new Event('input'));
+            };
+            emojiPicker.appendChild(span);
+        });
+
+        document.getElementById('chat-input-area').appendChild(emojiPicker);
+    });
+}
+
+// Close emoji picker when clicking outside
+document.addEventListener('click', (e) => {
+    if (emojiPicker && !emojiPicker.contains(e.target) && e.target !== emojiBtn) {
+        emojiPicker.remove();
+        emojiPicker = null;
+    }
+});
+
+// --- Attachment Logic ---
+if (attachBtn) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+}
+
+if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            alert("El archivo es demasiado grande (máx 5MB)");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const base64 = event.target.result;
+            // Send as individual message
+            await sendMessage(base64, file.type.startsWith('image/') ? 'image' : 'file');
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
 
 

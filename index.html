@@ -216,7 +216,7 @@
             <!-- Main Chat Area -->
             <div class="main-chat">
                 <!-- App Version -->
-                <div class="app-version">Version 2.16</div>
+                <div class="app-version">Version 2.17</div>
                 <!-- Chat Header -->
                 <div class="chat-header">
                     <div class="chat-header-info">
@@ -227,12 +227,6 @@
                             <h2 id="active-contact-name">Selecciona un chat</h2>
                             <span class="status">en línea</span>
                         </div>
-                    </div>
-                    <div class="chat-header-actions">
-                        <i class="fas fa-video" id="btn-video-call" title="Videollamada"></i>
-                        <i class="fas fa-phone" id="btn-voice-call" title="Llamada de voz"></i>
-                        <i class="fas fa-search"></i>
-                        <i class="fas fa-ellipsis-v"></i>
                     </div>
                 </div>
 
@@ -248,13 +242,46 @@
 
                 <!-- Chat Input -->
                 <div class="chat-input-area" id="chat-input-area" style="display: none;">
-                    <i class="far fa-smile"></i>
-                    <i class="fas fa-paperclip"></i>
+                    <i class="far fa-smile" id="emoji-btn"></i>
+                    <i class="fas fa-paperclip" id="attach-btn"></i>
+                    <input type="file" id="file-input" style="display: none;">
                     <div class="input-container">
                         <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
                     </div>
                     <i class="fas fa-microphone" id="voice-btn"></i>
                     <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
+                </div>
+            </div>
+
+            <!-- Dial Pad Modal (Llamar) -->
+            <div id="dialpad-modal" class="modal">
+                <div class="modal-content dialpad-content">
+                    <div class="modal-header">
+                        <h2>Marcador SEK</h2>
+                        <i class="fas fa-times" id="close-dialpad-modal"></i>
+                    </div>
+                    <div class="dialpad-display">
+                        <div id="dialpad-number"></div>
+                        <i class="fas fa-backspace" id="btn-dialpad-delete"></i>
+                    </div>
+                    <div class="dialpad-grid">
+                        <div class="dial-btn" data-val="1">1</div>
+                        <div class="dial-btn" data-val="2">2</div>
+                        <div class="dial-btn" data-val="3">3</div>
+                        <div class="dial-btn" data-val="4">4</div>
+                        <div class="dial-btn" data-val="5">5</div>
+                        <div class="dial-btn" data-val="6">6</div>
+                        <div class="dial-btn" data-val="7">7</div>
+                        <div class="dial-btn" data-val="8">8</div>
+                        <div class="dial-btn" data-val="9">9</div>
+                        <div class="dial-btn dial-btn-empty"></div>
+                        <div class="dial-btn" data-val="0">0</div>
+                        <div class="dial-btn dial-btn-empty"></div>
+                    </div>
+                    <button id="btn-dialpad-call" class="btn-dial-call">
+                        <i class="fas fa-phone"></i> Llamar
+                    </button>
+                    <div id="dialpad-error" class="dial-error"></div>
                 </div>
             </div>
         </div>

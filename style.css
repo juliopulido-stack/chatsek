@@ -1302,8 +1302,8 @@ body {
     width: 100%;
     padding: 15px;
     border-radius: 30px;
-    background: var(--primary);
-    /* Use primary blue */
+    background: #25d366;
+    /* WhatsApp Green */
     color: white;
     border: none;
     font-size: 18px;
@@ -1317,9 +1317,10 @@ body {
 }
 
 .btn-dial-call:hover {
-    background: var(--primary-dark);
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    background: #128c7e;
+    box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4);
 }
+
 
 .dial-error {
     color: #ef4444;
@@ -1416,4 +1417,40 @@ body {
     background: var(--primary);
     border-color: var(--primary);
     color: white;
+}
+
+/* --- WhatsApp Features (v2.17) --- */
+.emoji-picker {
+    position: absolute;
+    bottom: 80px;
+    left: 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    width: 250px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.emoji-item {
+    font-size: 20px;
+    cursor: pointer;
+    text-align: center;
+    padding: 5px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.emoji-item:hover {
+    background: var(--bg-hover);
+}
+
+#chat-input-area {
+    position: relative;
 }
