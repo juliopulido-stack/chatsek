@@ -70,6 +70,7 @@
                     <div class="header-actions">
                         <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
                             title="Panel de Administración"></i>
+                        <i class="fas fa-th" id="btn-dialpad" title="Abrir Marcador"></i>
                         <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
                         <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
                     </div>
@@ -84,6 +85,38 @@
 
                 <div class="contact-list" id="contact-list">
                     <!-- Contacts will be loaded here dynamically by JS -->
+                </div>
+            </div>
+
+            <!-- Dial Pad Modal -->
+            <div id="dialpad-modal" class="modal">
+                <div class="modal-content dialpad-content">
+                    <div class="modal-header">
+                        <h2>Marcador SEK</h2>
+                        <i class="fas fa-times" id="close-dialpad-modal"></i>
+                    </div>
+                    <div class="dialpad-display">
+                        <div id="dialpad-number"></div>
+                        <i class="fas fa-backspace" id="btn-dialpad-delete"></i>
+                    </div>
+                    <div class="dialpad-grid">
+                        <div class="dial-btn" data-val="1">1</div>
+                        <div class="dial-btn" data-val="2">2</div>
+                        <div class="dial-btn" data-val="3">3</div>
+                        <div class="dial-btn" data-val="4">4</div>
+                        <div class="dial-btn" data-val="5">5</div>
+                        <div class="dial-btn" data-val="6">6</div>
+                        <div class="dial-btn" data-val="7">7</div>
+                        <div class="dial-btn" data-val="8">8</div>
+                        <div class="dial-btn" data-val="9">9</div>
+                        <div class="dial-btn dial-btn-empty"></div>
+                        <div class="dial-btn" data-val="0">0</div>
+                        <div class="dial-btn dial-btn-empty"></div>
+                    </div>
+                    <button id="btn-dialpad-call" class="btn-dial-call">
+                        <i class="fas fa-comment"></i> Abrir Chat
+                    </button>
+                    <div id="dialpad-error" class="dial-error"></div>
                 </div>
             </div>
 
@@ -161,7 +194,7 @@
             <!-- Main Chat Area -->
             <div class="main-chat">
                 <!-- App Version -->
-                <div class="app-version">Version 2.11</div>
+                <div class="app-version">Version 2.12</div>
                 <!-- Chat Header -->
                 <div class="chat-header">
                     <div class="chat-header-info">
@@ -242,13 +275,13 @@
                 </button>
             </div>
         </div>
+    </div>
 
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-
-        <script src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 
 </html>

@@ -1220,3 +1220,131 @@ body {
     align-items: center;
     margin-bottom: 3px;
 }
+
+/* --- Dial Pad (Marcador) --- */
+.dialpad-content {
+    max-width: 320px !important;
+    text-align: center;
+}
+
+.dialpad-display {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 60px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#dialpad-number {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--primary);
+    flex: 1;
+}
+
+#btn-dialpad-delete {
+    font-size: 20px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 10px;
+}
+
+.dialpad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.dial-btn {
+    width: 65px;
+    height: 65px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin: 0 auto;
+}
+
+.dial-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.05);
+}
+
+.dial-btn:active {
+    transform: scale(0.95);
+    background: var(--primary);
+    color: white;
+}
+
+.dial-btn-empty {
+    background: transparent;
+    cursor: default;
+}
+
+.dial-btn-empty:hover {
+    background: transparent;
+    transform: none;
+}
+
+.btn-dial-call {
+    width: 100%;
+    padding: 15px;
+    border-radius: 30px;
+    background: #22c55e;
+    /* Green */
+    color: white;
+    border: none;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s;
+}
+
+.btn-dial-call:hover {
+    background: #16a34a;
+    box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+}
+
+.dial-error {
+    color: #ef4444;
+    font-size: 14px;
+    margin-top: 15px;
+    height: 20px;
+}
+
+.contact-phone {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.6;
+    display: block;
+    margin-top: 2px;
+}
+
+/* Mobile adjustments for dialpad */
+@media (max-width: 768px) {
+    .dialpad-content {
+        width: 85% !important;
+        padding: 25px !important;
+    }
+
+    .dial-btn {
+        width: 60px;
+        height: 60px;
+    }
+}

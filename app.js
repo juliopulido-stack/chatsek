@@ -101,6 +101,18 @@ const groupModal = document.getElementById('group-modal');
 const closeGroupModal = document.getElementById('close-group-modal');
 const memberSelectionList = document.getElementById('member-selection-list');
 const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
+
+// Dial Pad Elements
+const dialpadModal = document.getElementById('dialpad-modal');
+const btnOpenDialpad = document.getElementById('btn-dialpad');
+const closeDialpadModal = document.getElementById('close-dialpad-modal');
+const dialpadNumberDisplay = document.getElementById('dialpad-number');
+const btnDialpadDelete = document.getElementById('btn-dialpad-delete');
+const btnDialpadCall = document.getElementById('btn-dialpad-call');
+const dialpadError = document.getElementById('dialpad-error');
+const dialBtns = document.querySelectorAll('.dial-btn');
+let currentDialedNumber = "";
+
 const groupNameInput = document.getElementById('group-name');
 const memberSearchInput = document.getElementById('member-search');
 const btnBackSidebar = document.getElementById('btn-back-sidebar');
@@ -202,6 +214,17 @@ auth.onAuthStateChanged(async (user) => {
     }
 });
 
+async function generateUniquePhoneNumber() {
+    let exists = true;
+    let number = "";
+    while (exists) {
+        number = Math.floor(100000 + Math.random() * 900000).toString();
+        const snapshot = await db.collection("users").where("phoneNumber", "==", number).get();
+        if (snapshot.empty) exists = false;
+    }
+    return number;
+}
+
 async function handleUserLogin(user) {
     const userDocRef = db.collection("users").doc(user.uid);
     const doc = await userDocRef.get();
@@ -214,11 +237,19 @@ async function handleUserLogin(user) {
             role: "usuario",
             status: "online",
             pinnedChats: [],
+            phoneNumber: await generateUniquePhoneNumber(),
             lastSeen: firebase.firestore.FieldValue.serverTimestamp()
         };
         await userDocRef.set(currentUserData);
     } else {
         currentUserData = { uid: user.uid, ...doc.data() };
+
+        // Assign phone number if missing (migration)
+        if (!currentUserData.phoneNumber) {
+            currentUserData.phoneNumber = await generateUniquePhoneNumber();
+            await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
+        }
+
         // Check Ban Status
         if (checkBanStatus(currentUserData)) {
             // If banned, the checkBanStatus function will display the ban screen
@@ -834,13 +865,14 @@ function renderContacts() {
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
         const badge = isGroup ? '<span class="group-badge">Grupo</span>' : `<span class="role-badge role-${entity.role}">${entity.role}</span>`;
+        const phoneDisplay = !isGroup && entity.phoneNumber ? `<span class="contact-phone">SEK: ${entity.phoneNumber}</span>` : '';
 
         item.innerHTML = `
             ${indicator}
             <img src="${avatar}">
             <div class="contact-info">
                 <div class="contact-name-time">
-                    <span class="contact-name">${entity.name} ${badge}</span>
+                    <span class="contact-name">${entity.name} ${badge} ${phoneDisplay}</span>
                     <div style="display: flex; align-items: center;">
                         <span class="contact-time">${lastTime}</span>
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
@@ -1049,3 +1081,87 @@ btnCreateGroupSubmit.addEventListener('click', async () => {
 btnBackSidebar.addEventListener('click', () => {
     appContainer.classList.remove('show-chat');
 });
+
+// --- Dial Pad Logic ---
+btnOpenDialpad.addEventListener('click', () => {
+    currentDialedNumber = "";
+    dialpadNumberDisplay.textContent = "";
+    dialpadError.textContent = "";
+    dialpadModal.classList.add('active');
+});
+
+closeDialpadModal.addEventListener('click', () => {
+    dialpadModal.classList.remove('active');
+});
+
+dialBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const val = btn.getAttribute('data-val');
+        if (val) {
+            if (currentDialedNumber.length < 6) {
+                currentDialedNumber += val;
+                dialpadNumberDisplay.textContent = currentDialedNumber;
+                dialpadError.textContent = "";
+            }
+        }
+    });
+});
+
+btnDialpadDelete.addEventListener('click', () => {
+    currentDialedNumber = currentDialedNumber.slice(0, -1);
+    dialpadNumberDisplay.textContent = currentDialedNumber;
+    dialpadError.textContent = "";
+});
+
+btnDialpadCall.addEventListener('click', async () => {
+    if (currentDialedNumber.length < 6) {
+        dialpadError.textContent = "El número debe tener 6 dígitos";
+        return;
+    }
+
+    try {
+        const snapshot = await db.collection("users").where("phoneNumber", "==", currentDialedNumber).get();
+        if (snapshot.empty) {
+            dialpadError.textContent = "Usuario no encontrado";
+            return;
+        }
+
+        // We search in allUsers to ge the full entity object
+        const entity = allUsers.find(u => u.phoneNumber === currentDialedNumber);
+
+        if (entity) {
+            dialpadModal.classList.remove('active');
+            openChatWith(entity);
+        } else {
+            dialpadError.textContent = "Error al abrir el chat";
+        }
+    } catch (e) {
+        console.error("Dialpad search error:", e);
+        dialpadError.textContent = "Error en la búsqueda";
+    }
+});
+
+function openChatWith(entity) {
+    activeChatUser = entity;
+    const items = document.querySelectorAll('.contact-item');
+    items.forEach(el => el.classList.remove('active'));
+
+    activeContactName.textContent = entity.name;
+    const avatar = entity.isGroup ?
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+    activeContactImg.src = avatar;
+
+    chatHeaderInfo.classList.add('active');
+    chatHeaderText.classList.add('active');
+    welcomeMessage.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+
+    updateHeaderStatus();
+    renderMessages();
+
+    if (window.innerWidth <= 768) {
+        appContainer.classList.add('show-chat');
+    }
+}
+
