@@ -257,7 +257,7 @@ async function generateUniquePhoneNumber(name = "") {
     let exists = true;
     let number = "";
     while (exists) {
-        number = Math.floor(100000 + Math.random() * 900000).toString();
+        number = Math.floor(1000 + Math.random() * 9000).toString();
         const snapshot = await db.collection("users").where("phoneNumber", "==", number).get();
         if (snapshot.empty) exists = false;
     }
