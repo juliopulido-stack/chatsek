@@ -213,6 +213,7 @@ async function handleUserLogin(user) {
             name: user.email.split('@')[0],
             role: "usuario",
             status: "online",
+            pinnedChats: [],
             lastSeen: firebase.firestore.FieldValue.serverTimestamp()
         };
         await userDocRef.set(currentUserData);
@@ -362,6 +363,13 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
     const targetUser = isReceiver ? remoteUser : activeChatUser;
     if (!targetUser) return;
 
+    // Verify Jitsi library availability
+    if (typeof JitsiMeetExternalAPI === 'undefined') {
+        alert("⚠️ Error: La librería de SEK-Time no se ha cargado correctamente. Por favor, recarga la página.");
+        console.error("JitsiMeetExternalAPI is not defined");
+        return;
+    }
+
     callModal.classList.add('active');
     incomingCallOverlay.classList.remove('active');
     jitsiContainer.innerHTML = ''; // Clear previous calls
@@ -370,75 +378,85 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
     const loader = document.getElementById('jitsi-loader');
     if (loader) loader.classList.remove('jitsi-hidden');
 
-    // Safety timeout: remove loader after 10s even if event fails
-    const loaderTimeout = setTimeout(() => {
-        if (loader) loader.classList.add('jitsi-hidden');
-    }, 10000);
-
-    const domain = "meet.jit.si";
-    const ids = [auth.currentUser.uid, targetUser.uid].sort();
-    const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
-
-    const options = {
-        roomName: roomName,
-        width: '100%',
-        height: '100%',
-        parentNode: jitsiContainer,
-        userInfo: {
-            displayName: currentUserData.name
-        },
-        configOverwrite: {
-            prejoinPageEnabled: false,
-            prejoinConfig: { enabled: false },
-            startWithAudioMuted: false,
-            startWithVideoMuted: audioOnly,
-            disableDeepLinking: true,
-            enableWelcomePage: false,
-            enableClosePage: false
-        },
-        interfaceConfigOverwrite: {
-            SHOW_JITSI_WATERMARK: false,
-            DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
-            TOOLBAR_BUTTONS: [
-                'microphone', 'camera', 'desktop', 'fullscreen',
-                'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
-            ]
+    // Multi-stage safety nets for the loader
+    const loaderTimeoutFast = setTimeout(() => {
+        if (loader && !loader.classList.contains('jitsi-hidden')) {
+            console.warn("Jitsi: Connection taking longer than expected...");
         }
-    };
+    }, 5000);
 
-    jitsiApi = new JitsiMeetExternalAPI(domain, options);
-
-    // Force loader removal if taking too long (15s)
-    const safetyJitsiTimeout = setTimeout(() => {
-        console.warn("Jitsi connection timeout - removing loader manually");
+    const loaderTimeoutFinal = setTimeout(() => {
         if (loader) loader.classList.add('jitsi-hidden');
+        console.error("Jitsi: Connection timeout, hiding loader");
     }, 15000);
 
-    jitsiApi.addEventListeners({
-        readyToClose: endCall,
-        videoConferenceLeft: endCall,
-        videoConferenceJoined: () => {
-            console.log("SEK-Time: Conexión establecida");
-            clearTimeout(loaderTimeout);
-            clearTimeout(safetyJitsiTimeout);
-            if (loader) loader.classList.add('jitsi-hidden');
-        },
-        participantJoined: (event) => {
-            console.log("Participante unido:", event.displayName);
-        },
-        cameraError: (error) => {
-            console.error("Error de cámara en Jitsi:", error);
-            alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
-            if (loader) loader.classList.add('jitsi-hidden');
-        },
-        micError: (error) => {
-            console.error("Error de micrófono en Jitsi:", error);
-        }
-    });
+    try {
+        const domain = "meet.jit.si";
+        const ids = [auth.currentUser.uid, targetUser.uid].sort();
+        const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
 
-    if (!isReceiver) {
-        const type = audioOnly ? "Llamada de voz" : "Videollamada";
-        sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
+        const options = {
+            roomName: roomName,
+            width: '100%',
+            height: '100%',
+            parentNode: jitsiContainer,
+            userInfo: {
+                displayName: currentUserData.name
+            },
+            configOverwrite: {
+                prejoinPageEnabled: false,
+                prejoinConfig: { enabled: false },
+                startWithAudioMuted: false,
+                startWithVideoMuted: audioOnly,
+                disableDeepLinking: true,
+                enableWelcomePage: false,
+                enableClosePage: false
+            },
+            interfaceConfigOverwrite: {
+                SHOW_JITSI_WATERMARK: false,
+                DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
+                TOOLBAR_BUTTONS: [
+                    'microphone', 'camera', 'desktop', 'fullscreen',
+                    'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
+                ]
+            }
+        };
+
+        jitsiApi = new JitsiMeetExternalAPI(domain, options);
+
+        jitsiApi.addEventListeners({
+            readyToClose: endCall,
+            videoConferenceLeft: endCall,
+            videoConferenceJoined: () => {
+                console.log("SEK-Time: Conexión establecida correctamente");
+                clearTimeout(loaderTimeoutFast);
+                clearTimeout(loaderTimeoutFinal);
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            participantJoined: (event) => {
+                console.log("SEK-Time: Participante unido:", event.displayName);
+            },
+            cameraError: (error) => {
+                console.error("SEK-Time: Error de cámara:", error);
+                alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            micError: (error) => {
+                console.error("SEK-Time: Error de micrófono:", error);
+            }
+        });
+
+        if (!isReceiver) {
+            const type = audioOnly ? "Llamada de voz" : "Videollamada";
+            sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
+        }
+    } catch (error) {
+        console.error("SEK-Time: Error crítico iniciando llamada:", error);
+        alert("Hubo un error al iniciar la llamada. Por favor, inténtalo de nuevo.");
+        clearTimeout(loaderTimeoutFast);
+        clearTimeout(loaderTimeoutFinal);
+        if (loader) loader.classList.add('jitsi-hidden');
+        endCall();
     }
 }
 
@@ -775,10 +793,26 @@ function renderContacts() {
     contactList.innerHTML = '';
 
     // Merge Users and Groups
-    const combined = [...allGroups, ...allUsers];
+    let combined = [...allGroups, ...allUsers];
+
+    // Sorting Logic: Pinned first, then by last message time if possible
+    const pinnedIds = currentUserData.pinnedChats || [];
+
+    combined.sort((a, b) => {
+        const aPinned = pinnedIds.includes(a.uid);
+        const bPinned = pinnedIds.includes(b.uid);
+
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+
+        // If both pinned or both unpinned, we could sort by last message time here in the future
+        return 0;
+    });
 
     combined.forEach(entity => {
         const isGroup = entity.isGroup;
+        const isPinned = pinnedIds.includes(entity.uid);
+
         const chatNotes = allMessages.filter(m =>
             isGroup ? (m.groupId === entity.uid) :
                 ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) ||
@@ -789,8 +823,9 @@ function renderContacts() {
             const last = chatNotes[chatNotes.length - 1];
             lastText = last.text; lastTime = last.time;
         }
+
         const item = document.createElement('div');
-        item.className = 'contact-item';
+        item.className = 'contact-item' + (isPinned ? ' pinned' : '');
         if (activeChatUser && activeChatUser.uid === entity.uid) item.classList.add('active');
 
         const avatar = isGroup ?
@@ -806,10 +841,21 @@ function renderContacts() {
             <div class="contact-info">
                 <div class="contact-name-time">
                     <span class="contact-name">${entity.name} ${badge}</span>
-                    <span class="contact-time">${lastTime}</span>
+                    <div style="display: flex; align-items: center;">
+                        <span class="contact-time">${lastTime}</span>
+                        <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
+                    </div>
                 </div>
                 <div class="contact-message">${lastText}</div>
             </div>`;
+
+        // Handle Pin Toggle
+        const pinBtn = item.querySelector('.btn-pin');
+        pinBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevents opening the chat
+            togglePin(entity.uid);
+        });
+
         item.addEventListener('click', () => {
             activeChatUser = entity;
             document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
@@ -831,6 +877,26 @@ function renderContacts() {
         });
         contactList.appendChild(item);
     });
+}
+
+async function togglePin(entityId) {
+    if (!currentUserData) return;
+
+    let pinned = currentUserData.pinnedChats || [];
+    if (pinned.includes(entityId)) {
+        pinned = pinned.filter(id => id !== entityId);
+    } else {
+        pinned.push(entityId);
+    }
+
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({
+            pinnedChats: pinned
+        });
+        // Listener will trigger renderContacts automatically
+    } catch (e) {
+        console.error("Error toggling pin:", e);
+    }
 }
 
 function renderMessages() {

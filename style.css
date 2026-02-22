@@ -1170,3 +1170,36 @@ body {
     margin-left: 8px;
     text-transform: uppercase;
 }
+
+/* --- Pinned Chats --- */
+.btn-pin {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-left: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    opacity: 0.3;
+}
+
+.contact-item:hover .btn-pin {
+    opacity: 1;
+}
+
+.btn-pin.active {
+    color: #a855f7;
+    /* Violet */
+    opacity: 1;
+    transform: rotate(-45deg);
+}
+
+.contact-item.pinned {
+    border-left: 4px solid #a855f7;
+    background-color: rgba(168, 85, 247, 0.05);
+}
+
+.contact-name-time {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+}
