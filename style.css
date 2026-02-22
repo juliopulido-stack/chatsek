@@ -267,6 +267,25 @@ body {
     #idle-modal .modal-content {
         padding: 20px;
     }
+
+    /* Fixed Input Fix */
+    .app-container.show-chat .main-chat {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .chat-header,
+    .chat-input-area {
+        flex-shrink: 0;
+    }
+
+    .chat-input-area {
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+        background-color: var(--bg-panel);
+    }
 }
 
 .role-super-admin {
