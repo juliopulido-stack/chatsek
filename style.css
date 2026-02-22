@@ -26,6 +26,7 @@ body {
     background-color: var(--app-bg);
     color: var(--text-primary);
     height: 100vh;
+    height: 100dvh;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -212,6 +213,7 @@ body {
     .app-container {
         width: 100%;
         height: 100vh;
+        height: 100dvh;
         border-radius: 0;
     }
 
@@ -237,13 +239,14 @@ body {
         display: flex;
         flex-direction: column;
         width: 100%;
-        height: 100%;
-        position: absolute;
+        height: 100vh;
+        height: 100dvh;
+        position: fixed;
         top: 0;
         left: 0;
         z-index: 100;
         overflow: hidden;
-        /* Prevent entire chat area from scrolling */
+        background-color: #0b141a;
     }
 
     #btn-back-sidebar {
@@ -271,6 +274,8 @@ body {
         /* Only messages list should scroll */
         -webkit-overflow-scrolling: touch;
         /* Smoother scrolling on iOS */
+        padding-bottom: 80px;
+        /* Space for the fixed input */
     }
 
     .message {
@@ -288,13 +293,15 @@ body {
     }
 
     .chat-input-area {
-        position: relative;
-        /* Inside the flex container, header and messages take their space, this sits at the bottom */
+        position: fixed;
         bottom: 0;
-        padding: 10px;
+        left: 0;
+        width: 100%;
+        padding: 10px 16px;
         flex-shrink: 0;
-        /* Input area stays at the bottom */
         background-color: var(--bg-panel);
+        z-index: 1001;
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
     }
 }
 
