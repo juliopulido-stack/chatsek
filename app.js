@@ -904,8 +904,14 @@ function renderContacts() {
             `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
-        const badge = isGroup ? '<span class="group-badge">Grupo</span>' : `<span class="role-badge role-${entity.role}">${entity.role}</span>`;
-        const phoneDisplay = !isGroup && entity.phoneNumber ? `<span class="contact-phone">SEK: ${entity.phoneNumber}</span>` : '';
+        const normalize = (str) => {
+            return str.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+                .replace(/[^a-z0-9]/g, ''); // alphanumeric only
+        };
+        const cleanName = normalize(entity.name);
+        const displayPhone = entity.phoneNumber || reservedNumbers[cleanName] || '';
+        const phoneDisplay = !isGroup && displayPhone ? `<span class="contact-phone">SEK: ${displayPhone}</span>` : '';
 
         item.innerHTML = `
             ${indicator}
