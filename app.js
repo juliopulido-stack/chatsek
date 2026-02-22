@@ -22,6 +22,7 @@ let activeChatUser = null;
 let allMessages = [];
 let allUsers = [];
 let allGroups = [];
+let isUserBanned = false; // New global ban state
 let unsubscribeMessages = null;
 let unsubscribeUsers = null;
 let unsubscribeGroups = null;
@@ -103,6 +104,92 @@ const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
 const groupNameInput = document.getElementById('group-name');
 const memberSearchInput = document.getElementById('member-search');
 
+// --- Profanity & Strike System ---
+const PROFANITY_LIST = ["mierda", "puta", "puto", "gilipollas", "cabron", "cabrón", "follar", "hijo de puta", "joder", "coño", "maricon", "maricón", "zorra", "bollera", "pendejo", "idiota", "estupido", "estúpido"];
+
+const STRIKE_BANS = {
+    1: 1 * 60 * 60 * 1000,           // 1 hora
+    2: 5 * 60 * 60 * 1000,           // 5 horas
+    3: 24 * 60 * 60 * 1000,          // 1 día
+    4: 15 * 24 * 60 * 60 * 1000,     // 15 días
+    5: 30 * 24 * 60 * 60 * 1000,     // 1 mes
+    6: "permanent"                    // Permanente
+};
+
+function hasProfanity(text) {
+    const lowerText = text.toLowerCase();
+    return PROFANITY_LIST.some(word => lowerText.includes(word));
+}
+
+async function applyStrike() {
+    if (!auth.currentUser) return;
+
+    const userRef = db.collection("users").doc(auth.currentUser.uid);
+    const doc = await userRef.get();
+    const data = doc.data();
+
+    const currentStrikes = (data.strikes || 0) + 1;
+    let banDuration = STRIKE_BANS[currentStrikes] || STRIKE_BANS[5];
+    let banUntil = null;
+
+    if (banDuration === "permanent" || currentStrikes >= 6) {
+        banUntil = "permanent";
+    } else {
+        banUntil = firebase.firestore.Timestamp.fromMillis(Date.now() + banDuration);
+    }
+
+    await userRef.update({
+        strikes: currentStrikes,
+        banUntil: banUntil,
+        status: "offline"
+    });
+
+    alert(`⚠️ SANCIÓN POR LENGUAJE INAPROPIADO\n\nHas acumulado ${currentStrikes} falta(s).\nTu cuenta ha sido suspendida temporalmente.`);
+    location.reload(); // Force check
+}
+
+function checkBanStatus(data) {
+    if (!data.banUntil) return false;
+
+    if (data.banUntil === "permanent") {
+        showBanScreen("Sanción Permanente", "Has sido expulsado definitivamente por acumular 6 faltas. Contacta con un SuperAdmin para solicitar el desbloqueo.");
+        return true;
+    }
+
+    const now = Date.now();
+    const banDate = data.banUntil.toMillis();
+
+    if (now < banDate) {
+        const timeLeft = banDate - now;
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const days = Math.floor(hours / 24);
+
+        let msg = `Tu cuenta está suspendida. Quedan `;
+        if (days > 0) msg += `${days} días y ${hours % 24} horas.`;
+        else if (hours > 0) msg += `${hours} horas y ${minutes} minutos.`;
+        else msg += `${minutes} minutos.`;
+
+        showBanScreen("Cuenta Suspendida", msg);
+        return true;
+    }
+    return false;
+}
+
+function showBanScreen(title, message) {
+    isUserBanned = true;
+    document.body.innerHTML = `
+        <div style="background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: 'Inter', sans-serif; text-align: center; padding: 20px;">
+            <div style="max-width: 500px; background: #1e293b; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 0 50px rgba(244, 63, 94, 0.2);">
+                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px;"></i>
+                <h1 style="font-size: 32px; margin-bottom: 20px;">${title}</h1>
+                <p style="color: #94a3b8; font-size: 18px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+                <button onclick="location.reload()" class="btn-login" style="width: 100%;">Reintentar conexión</button>
+            </div>
+        </div>
+    `;
+}
+
 // --- Auth States ---
 
 auth.onAuthStateChanged(async (user) => {
@@ -129,6 +216,12 @@ async function handleUserLogin(user) {
         await userDocRef.set(currentUserData);
     } else {
         currentUserData = { uid: user.uid, ...doc.data() };
+        // Check Ban Status
+        if (checkBanStatus(currentUserData)) {
+            // If banned, the checkBanStatus function will display the ban screen
+            // and we should prevent further login process.
+            return;
+        }
         await updateUserStatus("online");
     }
 
@@ -443,8 +536,11 @@ function renderAdminUserList() {
         const targetIsUsuario = user.role === 'usuario';
         const isNotSelf = user.uid !== auth.currentUser.uid;
 
-        if ((isSuperAdmin && isNotSelf) || (isAdmin && targetIsUsuario)) {
-            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" title="Borrar"></i>`;
+        if (currentUserData.role === 'super_admin' && user.uid !== auth.currentUser.uid) {
+            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="margin-left: 15px;" title="Borrar"></i>`;
+            if (user.strikes > 0 || user.banUntil) {
+                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981; margin-left: 15px;" title="Resetear Faltas"></i>`;
+            }
         }
 
         actions += `</div>`;
@@ -757,6 +853,13 @@ messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMe
 async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
     const text = overrideText || messageInput.value.trim();
     if (!text || !activeChatUser) return;
+
+    // Profanity Check
+    if (hasProfanity(text)) {
+        applyStrike();
+        return; // Stop message from being sent
+    }
+
     const now = new Date();
     const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     if (!overrideText) messageInput.value = '';
