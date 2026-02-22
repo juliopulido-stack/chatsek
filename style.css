@@ -384,6 +384,19 @@ body {
     background-color: var(--bg-color);
 }
 
+.sidebar-footer {
+    padding: 10px 15px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-panel);
+}
+
+.app-version-sidebar {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+
 .sidebar-header {
     height: 60px;
     background-color: var(--bg-panel);

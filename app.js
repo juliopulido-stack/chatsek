@@ -223,22 +223,22 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 const reservedNumbers = {
-    "pablopulido": "102948",
-    "pablopulidonilson": "102948",
-    "pablo": "102948",
-    "abuela": "582103",
-    "gema": "739402",
-    "gemamaria": "739402",
-    "alvaropulido": "294857",
-    "alvaro": "294857",
-    "juliopuli": "110948",
-    "julio": "110948",
-    "juliopulido": "110948",
-    "jggimenez": "647382",
-    "fernandopulido": "384729",
-    "fernando": "384729",
-    "titamaribel": "928374",
-    "maribel": "928374"
+    "pablopulido": "1029",
+    "pablopulidonilson": "1029",
+    "pablo": "1029",
+    "abuela": "5821",
+    "gema": "7394",
+    "gemamaria": "7394",
+    "alvaropulido": "2948",
+    "alvaro": "2948",
+    "juliopuli": "1109",
+    "julio": "1109",
+    "juliopulido": "1109",
+    "jggimenez": "6473",
+    "fernandopulido": "3847",
+    "fernando": "3847",
+    "titamaribel": "9283",
+    "maribel": "9283"
 };
 
 async function generateUniquePhoneNumber(name = "") {
@@ -1144,7 +1144,7 @@ dialBtns.forEach(btn => {
     btn.addEventListener('click', () => {
         const val = btn.getAttribute('data-val');
         if (val) {
-            if (currentDialedNumber.length < 6) {
+            if (currentDialedNumber.length < 4) {
                 currentDialedNumber += val;
                 dialpadNumberDisplay.textContent = currentDialedNumber;
                 dialpadError.textContent = "";
@@ -1160,8 +1160,8 @@ btnDialpadDelete.addEventListener('click', () => {
 });
 
 btnDialpadCall.addEventListener('click', async () => {
-    if (currentDialedNumber.length < 6) {
-        dialpadError.textContent = "El número debe tener 6 dígitos";
+    if (currentDialedNumber.length < 4) {
+        dialpadError.textContent = "El número debe tener 4 dígitos";
         return;
     }
 
@@ -1279,7 +1279,9 @@ function renderDirectory(filter = "") {
 
         item.querySelector('[data-action="call"]').addEventListener('click', () => {
             directoryModal.classList.remove('active');
-            startCall(false, false, user);
+            // Find full user object if needed
+            const fullUser = allUsers.find(u => u.uid === user.uid) || user;
+            startCall(false, false, fullUser);
         });
 
         directoryList.appendChild(item);
