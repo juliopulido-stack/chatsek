@@ -222,7 +222,24 @@ auth.onAuthStateChanged(async (user) => {
     }
 });
 
-async function generateUniquePhoneNumber() {
+const reservedNumbers = {
+    "pablopulido": "102948",
+    "abuela": "582103",
+    "gema": "739402",
+    "alvaropulido": "294857",
+    "juliopuli": "110948",
+    "jggimenez": "647382",
+    "fernandopulido": "384729",
+    "titamaribel": "928374"
+};
+
+async function generateUniquePhoneNumber(name = "") {
+    // Check if user has a reserved number
+    const cleanName = name.toLowerCase().replace(/\s/g, '');
+    if (reservedNumbers[cleanName]) {
+        return reservedNumbers[cleanName];
+    }
+
     let exists = true;
     let number = "";
     while (exists) {
