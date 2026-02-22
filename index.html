@@ -1,254 +1,136 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat SEK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chat SEK 2.11</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Jitsi Meet API -->
-    <script src='https://meet.jit.si/external_api.js'></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
-
 <body>
-    <!-- Login Screen -->
-    <div id="login-screen" class="screen active">
-        <div class="login-container">
-            <div class="logo-container">
-                <i class="fas fa-comment-shield"></i>
-                <h1>Chat SEK</h1>
-                <p>Tu plataforma de mensajería privada</p>
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <img id="user-photo" src="https://via.placeholder.com/40" alt="Mi perfil">
+                    <span id="user-name-display">Cargando...</span>
+                </div>
+                <div class="header-actions">
+                    <button id="btn-admin-panel" title="Administración" style="display: none;">
+                        <i class="fas fa-user-shield"></i>
+                    </button>
+                    <button id="btn-logout" title="Cerrar sesión">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
             </div>
 
+            <div class="search-container">
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Buscar chat o mensaje...">
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="chats">CHATS</button>
+                <button class="tab-btn" data-tab="groups">GRUPOS</button>
+            </div>
+
+            <div id="contacts-list" class="contacts-list">
+                </div>
+            
+            <button id="btn-new-group" class="fab-btn" title="Nuevo Grupo">
+                <i class="fas fa-users"></i>
+            </button>
+        </aside>
+
+        <main class="main-chat" id="main-chat">
+            <header class="chat-header">
+                <button id="btn-back-sidebar" class="back-btn">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="active-contact-info">
+                    <img id="active-contact-img" src="https://via.placeholder.com/40" alt="">
+                    <div class="contact-status-container">
+                        <span id="active-contact-name">Selecciona un chat</span>
+                        <span id="active-contact-status"></span>
+                    </div>
+                </div>
+                <div class="chat-actions">
+                    <button id="btn-start-call" title="Llamada de voz">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button id="btn-start-video" title="Video llamada">
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <button id="btn-chat-info" title="Información">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div id="chat-messages" class="chat-messages">
+                <div class="welcome-screen">
+                    <i class="fas fa-comments"></i>
+                    <h2>Bienvenido a Chat SEK</h2>
+                    <p>Selecciona un contacto para comenzar a chatear.</p>
+                </div>
+            </div>
+
+            <footer class="chat-input-area">
+                <button class="icon-btn"><i class="far fa-smile"></i></button>
+                <button class="icon-btn" id="btn-attach"><i class="fas fa-paperclip"></i></button>
+                <div class="input-wrapper">
+                    <input type="text" id="message-input" placeholder="Escribe un mensaje..." autocomplete="off">
+                </div>
+                <button id="btn-send-message" class="send-btn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </footer>
+        </main>
+    </div>
+
+    <div id="login-screen" class="modal-overlay">
+        <div class="login-card">
+            <div class="login-header">
+                <img src="https://via.placeholder.com/80" alt="Logo SEK">
+                <h1>Chat SEK</h1>
+                <p>Acceso exclusivo</p>
+            </div>
             <form id="login-form">
-                <div class="input-group">
+                <div class="form-group">
                     <i class="fas fa-envelope"></i>
-                    <input type="email" id="email" placeholder="Correo electrónico" required autocomplete="off">
+                    <input type="email" id="login-email" placeholder="Correo institucional" required>
                 </div>
-
-                <div class="input-group">
+                <div class="form-group">
                     <i class="fas fa-lock"></i>
-                    <input type="password" id="password" placeholder="Contraseña" required>
+                    <input type="password" id="login-password" placeholder="Contraseña" required>
                 </div>
-
-                <div id="error-message" class="error-message">Correo o contraseña incorrectos</div>
-
-                <div class="auth-buttons">
-                    <button type="submit" class="btn-login" id="btn-login">Entrar <i
-                            class="fas fa-arrow-right"></i></button>
-                    <!-- Registro público eliminado por seguridad -->
-                </div>
+                <button type="submit" class="btn-primary">Iniciar Sesión</button>
             </form>
         </div>
     </div>
 
-    <!-- Chat Screen -->
-    <div id="chat-screen" class="screen">
-        <div class="app-container">
-            <!-- Inactivity Modal -->
-            <div id="idle-modal" class="modal">
-                <div class="modal-content">
-                    <i class="fas fa-clock"></i>
-                    <h2>¿Sigues ahí?</h2>
-                    <p>Has estado inactivo un tiempo. Si no respondes pronto, se cerrará tu sesión automáticamente por
-                        seguridad.</p>
-                    <div id="idle-timer-display">2:00</div>
-                    <button id="btn-idle-confirm" class="btn-login btn-idle-confirm">¡Estoy aquí!</button>
-                </div>
-            </div>
-
-            <!-- Sidebar (Contacts) -->
-            <div class="sidebar">
-                <div class="sidebar-header">
-                    <div class="user-profile">
-                        <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil"
-                            id="my-profile-img">
-                        <span id="current-user-name">Usuario</span>
-                    </div>
-                    <div class="header-actions">
-                        <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
-                            title="Panel de Administración"></i>
-                        <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
-                        <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
-                    </div>
-                </div>
-
-                <div class="search-bar">
-                    <div class="search-input">
-                        <i class="fas fa-search"></i>
-                        <input type="text" placeholder="Busca un chat o inicia uno nuevo">
-                    </div>
-                </div>
-
-                <div class="contact-list" id="contact-list">
-                    <!-- Contacts will be loaded here dynamically by JS -->
-                </div>
-            </div>
-
-            <!-- Group Creation Modal -->
-            <div id="group-modal" class="modal">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2>Crear Nuevo Grupo</h2>
-                        <i class="fas fa-times" id="close-group-modal"></i>
-                    </div>
-                    <div class="modal-body">
-                        <div class="group-form">
-                            <div class="input-group">
-                                <i class="fas fa-users"></i>
-                                <input type="text" id="group-name" placeholder="Nombre del grupo" required>
-                            </div>
-                            <div class="input-group" style="margin-top: 15px;">
-                                <i class="fas fa-search"></i>
-                                <input type="text" id="member-search" placeholder="Buscar contactos para añadir...">
-                            </div>
-                            <h3 style="margin-top: 15px;">Selecciona los miembros:</h3>
-                            <div class="member-selection-list" id="member-selection-list">
-                                <!-- Contact list with checkboxes will be here -->
-                            </div>
-                            <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear
-                                Grupo</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- Admin Panel Modal -->
-            <div id="admin-modal" class="modal">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2>Panel de Control - Usuarios</h2>
-                        <i class="fas fa-times" id="close-admin-modal"></i>
-                    </div>
-                    <div class="modal-body">
-                        <div class="admin-grid">
-                            <!-- Create/Edit User Form -->
-                            <div class="admin-card">
-                                <h3 id="admin-form-title">Crear Nuevo Usuario</h3>
-                                <form id="admin-create-user-form">
-                                    <input type="text" id="new-user-name" placeholder="Nombre completo" required>
-                                    <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
-                                    <div id="password-container">
-                                        <input type="password" id="new-user-password"
-                                            placeholder="Contraseña (solo para nuevos)" required>
-                                    </div>
-                                    <select id="new-user-role">
-                                        <option value="usuario">Usuario</option>
-                                        <option value="admin" id="opt-role-admin" style="display: none;">Admin</option>
-                                        <option value="super_admin" id="opt-role-superadmin" style="display: none;">
-                                            Super Admin</option>
-                                    </select>
-                                    <div class="form-actions" style="display: flex; gap: 10px;">
-                                        <button type="submit" class="btn-login" id="admin-form-submit">Registrar
-                                            Usuario</button>
-                                        <button type="button" class="btn-secondary" id="admin-form-cancel"
-                                            style="display: none;">Cancelar</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                        <!-- User List -->
-                        <div class="admin-card">
-                            <h3>Lista de Usuarios</h3>
-                            <div class="admin-user-list" id="admin-user-list">
-                                <!-- Dynamically loaded -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- Main Chat Area -->
-            <div class="main-chat">
-                <!-- App Version -->
-                <div class="app-version">Version 2.11</div>
-                <!-- Chat Header -->
-                <div class="chat-header">
-                    <div class="chat-header-info">
-                        <i class="fas fa-chevron-left" id="btn-back-sidebar"
-                            style="display: none; margin-right: 15px; cursor: pointer; font-size: 20px;"></i>
-                        <img id="active-contact-img" src="">
-                        <div class="chat-header-text">
-                            <h2 id="active-contact-name">Selecciona un chat</h2>
-                            <span class="status">en línea</span>
-                        </div>
-                    </div>
-                    <div class="chat-header-actions">
-                        <i class="fas fa-video" id="btn-video-call" title="Videollamada"></i>
-                        <i class="fas fa-phone" id="btn-voice-call" title="Llamada de voz"></i>
-                        <i class="fas fa-search"></i>
-                        <i class="fas fa-ellipsis-v"></i>
-                    </div>
-                </div>
-
-                <!-- Chat Messages -->
-                <div class="chat-messages" id="chat-messages">
-                    <div class="welcome-message" id="welcome-message">
-                        <i class="fas fa-shield-alt"></i>
-                        <h2>Chat SEK para Web</h2>
-                        <p>Envía y recibe mensajes con seguridad reforzada.</p>
-                    </div>
-                    <!-- Messages will appear here -->
-                </div>
-
-                <!-- Chat Input -->
-                <div class="chat-input-area" id="chat-input-area" style="display: none;">
-                    <i class="far fa-smile"></i>
-                    <i class="fas fa-paperclip"></i>
-                    <div class="input-container">
-                        <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
-                    </div>
-                    <i class="fas fa-microphone" id="voice-btn"></i>
-                    <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- SEK-Time Video Call Modal -->
-    <div id="call-modal" class="modal">
-        <div class="modal-content call-modal-content">
-            <div class="modal-header call-modal-header">
-                <div class="call-info">
-                    <i class="fas fa-video"></i>
-                    <h2 id="call-title">SEK-Time: Llamada en curso</h2>
-                </div>
-                <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
-            </div>
-            <div id="jitsi-container"></div>
-            <div id="jitsi-loader" class="jitsi-hidden">
-                <div class="spinner"></div>
-                <p>Conectando con SEK-Time...</p>
-                <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">Si tarda demasiado, comprueba tu conexión.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Incoming Call Overlay -->
-    <div id="incoming-call-overlay" class="calling-overlay">
-        <div class="calling-container">
-            <img src="" id="caller-avatar" class="caller-avatar" alt="Caller">
-            <div class="calling-text">
-                <h2 id="caller-name">Nombre</h2>
-                <p id="call-type-text">Videollamada entrante...</p>
+    <div id="incoming-call-overlay" class="call-overlay" style="display: none;">
+        <div class="call-content">
+            <div class="caller-info">
+                <img src="" id="caller-avatar" alt="Avatar">
+                <h3 id="caller-name">Llamada entrante...</h3>
+                <span id="call-type-label">Video SEK-Time</span>
             </div>
             <div class="calling-actions">
-                <button id="btn-accept-call" class="btn-call-action accept">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button id="btn-decline-call" class="btn-call-action decline">
-                    <i class="fas fa-phone-slash"></i>
-                </button>
+                <button id="btn-accept-call" class="call-btn accept"><i class="fas fa-phone"></i></button>
+                <button id="btn-reject-call" class="call-btn reject"><i class="fas fa-phone-slash"></i></button>
             </div>
         </div>
+    </div>
 
-
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-
-        <script src="app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://meet.jit.si/external_api.js"></script>
+    <script src="app.js"></script>
 </body>
-
 </html>
