@@ -103,6 +103,8 @@ const memberSelectionList = document.getElementById('member-selection-list');
 const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
 const groupNameInput = document.getElementById('group-name');
 const memberSearchInput = document.getElementById('member-search');
+const btnBackSidebar = document.getElementById('btn-back-sidebar');
+const appContainer = document.querySelector('.app-container');
 
 // --- Profanity & Strike System ---
 const PROFANITY_LIST = ["mierda", "puta", "puto", "gilipollas", "cabron", "cabrón", "follar", "hijo de puta", "joder", "coño", "maricon", "maricón", "zorra", "bollera", "pendejo", "idiota", "estupido", "estúpido"];
@@ -593,6 +595,19 @@ window.deleteUser = async (uid) => {
     }
 };
 
+window.resetStrikes = async (uid) => {
+    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            strikes: 0,
+            banUntil: null
+        });
+        alert("Faltas reseteadas con éxito.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
 adminCreateForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('new-user-name').value;
@@ -808,6 +823,11 @@ function renderContacts() {
 
             updateHeaderStatus();
             renderMessages();
+
+            // Mobile view toggle
+            if (window.innerWidth <= 768) {
+                appContainer.classList.add('show-chat');
+            }
         });
         contactList.appendChild(item);
     });
@@ -957,4 +977,9 @@ btnCreateGroupSubmit.addEventListener('click', async () => {
     } catch (e) {
         alert("Error creando grupo: " + e.message);
     }
+});
+
+// Mobile Back Button
+btnBackSidebar.addEventListener('click', () => {
+    appContainer.classList.remove('show-chat');
 });
