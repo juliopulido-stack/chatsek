@@ -101,6 +101,7 @@ const closeGroupModal = document.getElementById('close-group-modal');
 const memberSelectionList = document.getElementById('member-selection-list');
 const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
 const groupNameInput = document.getElementById('group-name');
+const memberSearchInput = document.getElementById('member-search');
 
 // --- Auth States ---
 
@@ -782,15 +783,41 @@ btnNewGroup.addEventListener('click', () => {
     renderMemberSelection();
 });
 
-closeGroupModal.addEventListener('click', () => groupModal.classList.remove('active'));
+closeGroupModal.addEventListener('click', () => {
+    groupModal.classList.remove('active');
+    groupNameInput.value = '';
+    memberSearchInput.value = '';
+});
 
-function renderMemberSelection() {
+memberSearchInput.addEventListener('input', () => {
+    renderMemberSelection(memberSearchInput.value.trim().toLowerCase());
+});
+
+function renderMemberSelection(filter = '') {
+    // Keep track of currently checked ones so we don't lose them on re-render
+    const checkedUids = Array.from(memberSelectionList.querySelectorAll('input:checked'))
+        .map(input => input.value);
+
     memberSelectionList.innerHTML = '';
-    allUsers.forEach(user => {
+
+    // Filter users (excluding self)
+    const filteredUsers = allUsers.filter(user => {
+        if (user.uid === auth.currentUser.uid) return false;
+        if (!filter) return true;
+        return user.name.toLowerCase().includes(filter) || user.email.toLowerCase().includes(filter);
+    });
+
+    if (filteredUsers.length === 0) {
+        memberSelectionList.innerHTML = '<div style="color: var(--text-secondary); padding: 10px; text-align: center;">No se encontraron contactos</div>';
+        return;
+    }
+
+    filteredUsers.forEach(user => {
         const item = document.createElement('div');
         item.className = 'member-item';
+        const isChecked = checkedUids.includes(user.uid) ? 'checked' : '';
         item.innerHTML = `
-            <input type="checkbox" id="check-${user.uid}" value="${user.uid}">
+            <input type="checkbox" id="check-${user.uid}" value="${user.uid}" ${isChecked}>
             <label for="check-${user.uid}">${user.name} (${user.email})</label>
         `;
         memberSelectionList.appendChild(item);
