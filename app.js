@@ -1301,44 +1301,36 @@ function renderDirectory(filter = "") {
         item.className = "directory-item";
         const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
 
-        // Use reserved number if Firestore doesn't have it yet
-        const normalize = (str) => {
-            return str.toLowerCase()
-                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
-                .replace(/[^a-z0-9]/g, ''); // alphanumeric only
-        };
-        const cleanName = normalize(user.name);
-        const phone = user.phoneNumber || reservedNumbers[cleanName] || "Pendiente";
-
         item.innerHTML = `
             <div class="directory-item-info">
                 <img src="${avatar}">
                 <div class="directory-item-text">
-                    <h4>${user.name}</h4>
-                    <span>SEK: ${phone}</span>
+                    <h4>${user.name} ${user.isRegistered ? '' : '<span style="font-size: 10px; color: #f59e0b; margin-left: 5px;">(Pendiente)</span>'}</h4>
+                    <span>SEK: ${user.phoneNumber}</span>
                 </div>
             </div>
             <div style="display: flex; gap: 8px;">
-                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white;">
+                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white; ${user.isRegistered ? '' : 'opacity: 0.5; cursor: not-allowed;'}" ${user.isRegistered ? '' : 'disabled'}>
                     <i class="fas fa-comment"></i>
                 </button>
-                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white;">
+                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white; ${user.isRegistered ? '' : 'opacity: 0.5; cursor: not-allowed;'}" ${user.isRegistered ? '' : 'disabled'}>
                     <i class="fas fa-phone"></i>
                 </button>
             </div>
         `;
 
-        item.querySelector('[data-action="chat"]').addEventListener('click', () => {
-            directoryModal.classList.remove('active');
-            openChatWith(user);
-        });
+        if (user.isRegistered) {
+            item.querySelector('[data-action="chat"]').addEventListener('click', () => {
+                directoryModal.classList.remove('active');
+                openChatWith(user);
+            });
 
-        item.querySelector('[data-action="call"]').addEventListener('click', () => {
-            directoryModal.classList.remove('active');
-            // Find full user object if needed
-            const fullUser = allUsers.find(u => u.uid === user.uid) || user;
-            startCall(false, false, fullUser);
-        });
+            item.querySelector('[data-action="call"]').addEventListener('click', () => {
+                directoryModal.classList.remove('active');
+                const fullUser = allUsers.find(u => u.uid === user.uid) || user;
+                startCall(false, false, fullUser);
+            });
+        }
 
         directoryList.appendChild(item);
     });
