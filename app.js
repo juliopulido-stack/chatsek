@@ -223,6 +223,7 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 const reservedNumbers = {
+    "pablopulidonilson": "102948",
     "pablopulido": "102948",
     "abuela": "582103",
     "gema": "739402",
