@@ -1238,7 +1238,15 @@ function renderDirectory(filter = "") {
         const item = document.createElement('div');
         item.className = "directory-item";
         const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
-        const phone = user.phoneNumber || "S/N";
+
+        // Use reserved number if Firestore doesn't have it yet
+        const normalize = (str) => {
+            return str.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
+                .replace(/[^a-z0-9]/g, ''); // alphanumeric only
+        };
+        const cleanName = normalize(user.name);
+        const phone = user.phoneNumber || reservedNumbers[cleanName] || "Pendiente";
 
         item.innerHTML = `
             <div class="directory-item-info">
@@ -1248,19 +1256,38 @@ function renderDirectory(filter = "") {
                     <span>SEK: ${phone}</span>
                 </div>
             </div>
-            <button class="btn-directory-action" data-uid="${user.uid}">
-                <i class="fas fa-comment"></i> Abrir Chat
-            </button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white;">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white;">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
         `;
 
-        item.querySelector('.btn-directory-action').addEventListener('click', () => {
+        item.querySelector('[data-action="chat"]').addEventListener('click', () => {
             directoryModal.classList.remove('active');
             openChatWith(user);
+        });
+
+        item.querySelector('[data-action="call"]').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            startCall(false, false, user);
         });
 
         directoryList.appendChild(item);
     });
 }
+
+// Update openChatWith to show header actions
+const originalOpenChatWith = openChatWith;
+openChatWith = function (entity) {
+    originalOpenChatWith(entity);
+    const headerActions = document.getElementById('chat-header-actions');
+    if (headerActions) headerActions.style.display = 'flex';
+};
+
 
 // --- WhatsApp Features (v2.17) ---
 const emojiBtn = document.getElementById('emoji-btn');
