@@ -26,6 +26,7 @@ let unsubscribeUsers = null;
 let editingUserId = null;
 let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
+let listenerStartTime = Date.now(); // Used to filter out old messages upon login
 
 // DOM Elements
 const loginScreen = document.getElementById('login-screen');
@@ -498,9 +499,19 @@ function setupMessagesListener() {
             snapshot.docChanges().forEach(change => {
                 if (change.type === "added") {
                     const msg = { id: change.doc.id, ...change.doc.data() };
+
                     // Detect Incoming Call
                     if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
-                        handleIncomingCall(msg);
+                        // FILTER: Only handle if the message is really new (within last 30s)
+                        // This prevents "ghost calls" from old documents in Firestore
+                        const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                        const thirtySecondsAgo = Date.now() - 30000;
+
+                        if (msgTime > thirtySecondsAgo && msgTime > listenerStartTime) {
+                            handleIncomingCall(msg);
+                        } else {
+                            console.log("Ignorando llamada antigua del:", new Date(msgTime).toLocaleTimeString());
+                        }
                     }
                 }
             });
