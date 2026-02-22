@@ -235,6 +235,15 @@ body {
 
     .app-container.show-chat .main-chat {
         display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 100;
+        overflow: hidden;
+        /* Prevent entire chat area from scrolling */
     }
 
     #btn-back-sidebar {
@@ -243,6 +252,8 @@ body {
 
     .chat-header {
         padding: 10px;
+        flex-shrink: 0;
+        /* Header stays at the top */
     }
 
     .chat-header-info img {
@@ -252,6 +263,14 @@ body {
 
     .chat-header-text h2 {
         font-size: 16px;
+    }
+
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        /* Only messages list should scroll */
+        -webkit-overflow-scrolling: touch;
+        /* Smoother scrolling on iOS */
     }
 
     .message {
@@ -268,22 +287,13 @@ body {
         padding: 20px;
     }
 
-    /* Fixed Input Fix */
-    .app-container.show-chat .main-chat {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-    }
-
-    .chat-header,
     .chat-input-area {
-        flex-shrink: 0;
-    }
-
-    .chat-input-area {
-        position: sticky;
+        position: relative;
+        /* Inside the flex container, header and messages take their space, this sits at the bottom */
         bottom: 0;
-        z-index: 10;
+        padding: 10px;
+        flex-shrink: 0;
+        /* Input area stays at the bottom */
         background-color: var(--bg-panel);
     }
 }
