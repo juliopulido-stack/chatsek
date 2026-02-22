@@ -1348,3 +1348,72 @@ body {
         height: 60px;
     }
 }
+
+/* --- Directory Modal --- */
+.directory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 20px;
+    padding-right: 5px;
+}
+
+.directory-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.directory-item:hover {
+    background: var(--bg-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.directory-item-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.directory-item img {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+}
+
+.directory-item-text h4 {
+    font-size: 16px;
+    margin-bottom: 2px;
+}
+
+.directory-item-text span {
+    font-size: 13px;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.btn-directory-action {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-directory-action:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}

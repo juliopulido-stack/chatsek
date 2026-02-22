@@ -70,6 +70,7 @@
                     <div class="header-actions">
                         <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
                             title="Panel de Administración"></i>
+                        <i class="fas fa-address-book" id="btn-directory" title="Agenda / Directorio"></i>
                         <i class="fas fa-th" id="btn-dialpad" title="Abrir Marcador"></i>
                         <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
                         <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
@@ -117,6 +118,27 @@
                         <i class="fas fa-paper-plane"></i> Enviar
                     </button>
                     <div id="dialpad-error" class="dial-error"></div>
+                </div>
+            </div>
+
+            <!-- Directory Modal -->
+            <div id="directory-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Directorio de Usuarios</h2>
+                        <i class="fas fa-times" id="close-directory-modal"></i>
+                    </div>
+                    <div class="modal-body">
+                        <div class="search-bar">
+                            <div class="search-input">
+                                <i class="fas fa-search"></i>
+                                <input type="text" id="directory-search" placeholder="Buscar por nombre o número...">
+                            </div>
+                        </div>
+                        <div id="directory-list" class="directory-list">
+                            <!-- Users will be loaded here -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -194,7 +216,7 @@
             <!-- Main Chat Area -->
             <div class="main-chat">
                 <!-- App Version -->
-                <div class="app-version">Version 2.13</div>
+                <div class="app-version">Version 2.14</div>
                 <!-- Chat Header -->
                 <div class="chat-header">
                     <div class="chat-header-info">

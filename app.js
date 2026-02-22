@@ -114,6 +114,13 @@ const dialpadError = document.getElementById('dialpad-error');
 const dialBtns = document.querySelectorAll('.dial-btn');
 let currentDialedNumber = "";
 
+// Directory Elements
+const directoryModal = document.getElementById('directory-modal');
+const btnOpenDirectory = document.getElementById('btn-directory');
+const closeDirectoryModal = document.getElementById('close-directory-modal');
+const directorySearchInput = document.getElementById('directory-search');
+const directoryList = document.getElementById('directory-list');
+
 const groupNameInput = document.getElementById('group-name');
 const memberSearchInput = document.getElementById('member-search');
 const btnBackSidebar = document.getElementById('btn-back-sidebar');
@@ -1165,4 +1172,62 @@ function openChatWith(entity) {
         appContainer.classList.add('show-chat');
     }
 }
+
+// --- Directory Logic ---
+btnOpenDirectory.addEventListener('click', () => {
+    directoryModal.classList.add('active');
+    directorySearchInput.value = "";
+    renderDirectory();
+});
+
+closeDirectoryModal.addEventListener('click', () => {
+    directoryModal.classList.remove('active');
+});
+
+directorySearchInput.addEventListener('input', () => {
+    renderDirectory(directorySearchInput.value.trim().toLowerCase());
+});
+
+function renderDirectory(filter = "") {
+    directoryList.innerHTML = "";
+
+    const filteredUsers = allUsers.filter(u => {
+        if (!filter) return true;
+        const phone = u.phoneNumber || "";
+        return u.name.toLowerCase().includes(filter) || phone.includes(filter);
+    });
+
+    if (filteredUsers.length === 0) {
+        directoryList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">No se encontraron usuarios</div>';
+        return;
+    }
+
+    filteredUsers.forEach(user => {
+        const item = document.createElement('div');
+        item.className = "directory-item";
+        const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
+        const phone = user.phoneNumber || "S/N";
+
+        item.innerHTML = `
+            <div class="directory-item-info">
+                <img src="${avatar}">
+                <div class="directory-item-text">
+                    <h4>${user.name}</h4>
+                    <span>SEK: ${phone}</span>
+                </div>
+            </div>
+            <button class="btn-directory-action" data-uid="${user.uid}">
+                <i class="fas fa-comment"></i> Abrir Chat
+            </button>
+        `;
+
+        item.querySelector('.btn-directory-action').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            openChatWith(user);
+        });
+
+        directoryList.appendChild(item);
+    });
+}
+
 
