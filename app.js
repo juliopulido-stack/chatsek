@@ -1229,10 +1229,63 @@ directorySearchInput.addEventListener('input', () => {
 function renderDirectory(filter = "") {
     directoryList.innerHTML = "";
 
-    const filteredUsers = allUsers.filter(u => {
+    // 1. Get all unique entries from reservedNumbers
+    const reservedEntries = [];
+    const seenNumbers = new Set();
+    const friendlyNames = {
+        "pablopulido": "Pablo Pulido",
+        "pablopulidonilson": "Pablo Pulido Nilson",
+        "pablo": "Pablo",
+        "abuela": "Abuela",
+        "gema": "Gema",
+        "gemamaria": "Gema María",
+        "alvaropulido": "Álvaro Pulido",
+        "alvaro": "Álvaro",
+        "juliopuli": "Julio Puli",
+        "julio": "Julio",
+        "juliopulido": "Julio Pulido",
+        "fernandopulido": "Fernando Pulido",
+        "fernando": "Fernando",
+        "titamaribel": "Tita Maribel",
+        "maribel": "Maribel",
+        "jggimenez": "J.G. Giménez"
+    };
+
+    Object.keys(reservedNumbers).forEach(key => {
+        const num = reservedNumbers[key];
+        if (!seenNumbers.has(num)) {
+            reservedEntries.push({
+                name: friendlyNames[key] || (key.charAt(0).toUpperCase() + key.slice(1)),
+                phoneNumber: num
+            });
+            seenNumbers.add(num);
+        }
+    });
+
+    // 2. Create combined list
+    let displayList = allUsers.map(u => ({
+        uid: u.uid,
+        name: u.name,
+        phoneNumber: u.phoneNumber,
+        isRegistered: true
+    }));
+
+    const registeredNumbersSet = new Set(allUsers.map(u => u.phoneNumber));
+    reservedEntries.forEach(entry => {
+        if (!registeredNumbersSet.has(entry.phoneNumber)) {
+            displayList.push({
+                uid: `off-${entry.phoneNumber}`,
+                name: entry.name,
+                phoneNumber: entry.phoneNumber,
+                isRegistered: false
+            });
+        }
+    });
+
+    // 3. Filter and Sort
+    const filtered = displayList.filter(u => {
         if (!filter) return true;
-        const phone = u.phoneNumber || "";
-        return u.name.toLowerCase().includes(filter) || phone.includes(filter);
+        return u.name.toLowerCase().includes(filter) || u.phoneNumber.includes(filter);
     });
 
     if (filteredUsers.length === 0) {
