@@ -1303,7 +1303,13 @@ const attachBtn = document.getElementById('attach-btn');
 const fileInput = document.getElementById('file-input');
 let emojiPicker = null;
 
-// --- Emoji Logic ---
+// Search contacts
+const contactSearchInput = document.getElementById('contact-search-input');
+if (contactSearchInput) {
+    contactSearchInput.addEventListener('input', (e) => {
+        renderContacts(e.target.value.toLowerCase());
+    });
+}
 if (emojiBtn) {
     emojiBtn.addEventListener('click', () => {
         if (emojiPicker) {
