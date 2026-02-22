@@ -1288,7 +1288,7 @@ function renderDirectory(filter = "") {
         return u.name.toLowerCase().includes(filter) || u.phoneNumber.includes(filter);
     });
 
-    if (filteredUsers.length === 0) {
+    if (filtered.length === 0) {
         directoryList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">No se encontraron usuarios</div>';
         return;
     }
