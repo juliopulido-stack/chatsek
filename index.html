@@ -47,6 +47,18 @@
     <!-- Chat Screen -->
     <div id="chat-screen" class="screen">
         <div class="app-container">
+            <!-- Inactivity Modal -->
+            <div id="idle-modal" class="modal">
+                <div class="modal-content">
+                    <i class="fas fa-clock"></i>
+                    <h2>¿Sigues ahí?</h2>
+                    <p>Has estado inactivo un tiempo. Si no respondes pronto, se cerrará tu sesión automáticamente por
+                        seguridad.</p>
+                    <div id="idle-timer-display">2:00</div>
+                    <button id="btn-idle-confirm" class="btn-login btn-idle-confirm">¡Estoy aquí!</button>
+                </div>
+            </div>
+
             <!-- Sidebar (Contacts) -->
             <div class="sidebar">
                 <div class="sidebar-header">
@@ -123,7 +135,7 @@
             <!-- Main Chat Area -->
             <div class="main-chat">
                 <!-- App Version -->
-                <div class="app-version">Version 2.03</div>
+                <div class="app-version">Version 2.04</div>
                 <!-- Chat Header -->
                 <div class="chat-header">
                     <div class="chat-header-info">
@@ -200,15 +212,13 @@
                 </button>
             </div>
         </div>
-    </div>
 
 
-    <!-- Firebase v9 Compat Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+        <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 
-    <script src="app.js"></script>
+        <script src="app.js"></script>
 </body>
 
 </html>

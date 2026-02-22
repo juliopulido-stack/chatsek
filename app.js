@@ -28,6 +28,12 @@ let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
 let listenerStartTime = Date.now(); // Used to filter out old messages upon login
 
+// Inactivity Settings
+let idleTimeout;
+let logoutTimeout;
+const IDLE_TIME_LIMIT = 5 * 60 * 1000; // 5 minutes
+const LOGOUT_TIME_LIMIT = 2 * 60 * 1000; // 2 minutes
+
 // DOM Elements
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
@@ -82,6 +88,10 @@ const callTypeText = document.getElementById('call-type-text');
 const btnAcceptCall = document.getElementById('btn-accept-call');
 const btnDeclineCall = document.getElementById('btn-decline-call');
 
+const idleModal = document.getElementById('idle-modal');
+const btnIdleConfirm = document.getElementById('btn-idle-confirm');
+const idleTimerDisplay = document.getElementById('idle-timer-display');
+
 // --- Auth States ---
 
 auth.onAuthStateChanged(async (user) => {
@@ -114,7 +124,71 @@ async function handleUserLogin(user) {
     setupUsersListener();
     setupMessagesListener();
     showChatScreen();
+    startIdleMonitoring();
 }
+
+// --- Inactivity Logic ---
+
+function startIdleMonitoring() {
+    stopIdleMonitoring(); // Reset if already running
+    resetIdleTimer();
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.addEventListener(evt, resetIdleTimer);
+    });
+}
+
+function stopIdleMonitoring() {
+    clearTimeout(idleTimeout);
+    clearTimeout(logoutTimeout);
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.removeEventListener(evt, resetIdleTimer);
+    });
+}
+
+function resetIdleTimer() {
+    if (idleModal.classList.contains('active')) return; // Don't reset if modal is showing
+
+    clearTimeout(idleTimeout);
+    idleTimeout = setTimeout(showIdleModal, IDLE_TIME_LIMIT);
+}
+
+function showIdleModal() {
+    idleModal.classList.add('active');
+    updateUserStatus("offline"); // Mark as away/offline in background
+
+    let secondsLeft = 120;
+    idleTimerDisplay.textContent = `2:00`;
+
+    clearInterval(window.logoutCountdown);
+    window.logoutCountdown = setInterval(() => {
+        secondsLeft--;
+        const mins = Math.floor(secondsLeft / 60);
+        const secs = secondsLeft % 60;
+        idleTimerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+        if (secondsLeft <= 0) {
+            clearInterval(window.logoutCountdown);
+            handleAutoLogout();
+        }
+    }, 1000);
+}
+
+async function handleAutoLogout() {
+    idleModal.classList.remove('active');
+    await updateUserStatus("offline");
+    auth.signOut();
+    alert("Sesión cerrada por inactividad.");
+}
+
+btnIdleConfirm.addEventListener('click', () => {
+    idleModal.classList.remove('active');
+    clearInterval(window.logoutCountdown);
+    updateUserStatus("online");
+    resetIdleTimer();
+});
 
 // --- Presence System ---
 
