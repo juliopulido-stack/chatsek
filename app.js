@@ -115,6 +115,8 @@ async function handleUserLogin(user) {
     showChatScreen();
 }
 
+// --- Presence System ---
+
 async function updateUserStatus(status) {
     if (!auth.currentUser) return;
     try {
@@ -127,8 +129,21 @@ async function updateUserStatus(status) {
     }
 }
 
-window.addEventListener('beforeunload', () => {
+// Handle Page Visibility (Online/Away)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        updateUserStatus("online");
+    } else {
+        // We set to offline or away when tab is hidden to be more accurate
+        updateUserStatus("offline");
+    }
+});
+
+// Handle Window Close
+window.addEventListener('beforeunload', (event) => {
     if (auth.currentUser) {
+        // Use a synchronous-ish update or navigator.sendBeacon if needed,
+        // but for Firestore, a direct update usually works if not too many fields.
         db.collection("users").doc(auth.currentUser.uid).update({
             status: "offline",
             lastSeen: firebase.firestore.FieldValue.serverTimestamp()
@@ -211,12 +226,31 @@ function startCall(audioOnly, isReceiver = false, remoteUser = null) {
 
     jitsiApi = new JitsiMeetExternalAPI(domain, options);
 
+    // Force loader removal if taking too long (15s)
+    const safetyJitsiTimeout = setTimeout(() => {
+        console.warn("Jitsi connection timeout - removing loader manually");
+        if (loader) loader.classList.add('jitsi-hidden');
+    }, 15000);
+
     jitsiApi.addEventListeners({
         readyToClose: endCall,
         videoConferenceLeft: endCall,
         videoConferenceJoined: () => {
+            console.log("SEK-Time: Conexión establecida");
             clearTimeout(loaderTimeout);
+            clearTimeout(safetyJitsiTimeout);
             if (loader) loader.classList.add('jitsi-hidden');
+        },
+        participantJoined: (event) => {
+            console.log("Participante unido:", event.displayName);
+        },
+        cameraError: (error) => {
+            console.error("Error de cámara en Jitsi:", error);
+            alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
+            if (loader) loader.classList.add('jitsi-hidden');
+        },
+        micError: (error) => {
+            console.error("Error de micrófono en Jitsi:", error);
         }
     });
 
