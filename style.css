@@ -1302,8 +1302,8 @@ body {
     width: 100%;
     padding: 15px;
     border-radius: 30px;
-    background: #22c55e;
-    /* Green */
+    background: var(--primary);
+    /* Use primary blue */
     color: white;
     border: none;
     font-size: 18px;
@@ -1317,8 +1317,8 @@ body {
 }
 
 .btn-dial-call:hover {
-    background: #16a34a;
-    box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+    background: var(--primary-dark);
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
 }
 
 .dial-error {
