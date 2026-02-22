@@ -438,7 +438,12 @@ function renderAdminUserList() {
             actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary); margin-right: 15px;" title="Editar"></i>`;
         }
 
-        if (currentUserData.role === 'super_admin' && user.uid !== auth.currentUser.uid) {
+        const isSuperAdmin = currentUserData.role === 'super_admin';
+        const isAdmin = currentUserData.role === 'admin';
+        const targetIsUsuario = user.role === 'usuario';
+        const isNotSelf = user.uid !== auth.currentUser.uid;
+
+        if ((isSuperAdmin && isNotSelf) || (isAdmin && targetIsUsuario)) {
             actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" title="Borrar"></i>`;
         }
 
