@@ -255,14 +255,15 @@ async function handleUserLogin(user) {
     const doc = await userDocRef.get();
 
     if (!doc.exists) {
+        const name = user.email.split('@')[0];
         currentUserData = {
             uid: user.uid,
             email: user.email,
-            name: user.email.split('@')[0],
+            name: name,
             role: "usuario",
             status: "online",
             pinnedChats: [],
-            phoneNumber: await generateUniquePhoneNumber(),
+            phoneNumber: await generateUniquePhoneNumber(name),
             lastSeen: firebase.firestore.FieldValue.serverTimestamp()
         };
         await userDocRef.set(currentUserData);
@@ -271,7 +272,7 @@ async function handleUserLogin(user) {
 
         // Assign phone number if missing (migration)
         if (!currentUserData.phoneNumber) {
-            currentUserData.phoneNumber = await generateUniquePhoneNumber();
+            currentUserData.phoneNumber = await generateUniquePhoneNumber(currentUserData.name);
             await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
         }
 
