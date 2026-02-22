@@ -1293,7 +1293,10 @@ function renderDirectory(filter = "") {
         return;
     }
 
-    filteredUsers.forEach(user => {
+    // Sort by name
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+    filtered.forEach(user => {
         const item = document.createElement('div');
         item.className = "directory-item";
         const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
