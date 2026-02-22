@@ -21,8 +21,10 @@ let currentUserData = null;
 let activeChatUser = null;
 let allMessages = [];
 let allUsers = [];
+let allGroups = [];
 let unsubscribeMessages = null;
 let unsubscribeUsers = null;
+let unsubscribeGroups = null;
 let editingUserId = null;
 let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
@@ -91,6 +93,14 @@ const btnDeclineCall = document.getElementById('btn-decline-call');
 const idleModal = document.getElementById('idle-modal');
 const btnIdleConfirm = document.getElementById('btn-idle-confirm');
 const idleTimerDisplay = document.getElementById('idle-timer-display');
+
+// Group Modal Elements
+const btnNewGroup = document.getElementById('btn-new-group');
+const groupModal = document.getElementById('group-modal');
+const closeGroupModal = document.getElementById('close-group-modal');
+const memberSelectionList = document.getElementById('member-selection-list');
+const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
+const groupNameInput = document.getElementById('group-name');
 
 // --- Auth States ---
 
@@ -231,6 +241,7 @@ function showLoginScreen() {
     activeChatUser = null;
     if (unsubscribeMessages) unsubscribeMessages();
     if (unsubscribeUsers) unsubscribeUsers();
+    if (unsubscribeGroups) unsubscribeGroups();
     chatScreen.classList.remove('active');
     loginScreen.classList.add('active');
 }
@@ -537,7 +548,8 @@ function setupUsersListener() {
             }
         });
         renderContacts();
-        if (activeChatUser) {
+        setupGroupsListener(); // Refresh groups too
+        if (activeChatUser && !activeChatUser.isGroup) {
             const updatedActive = allUsers.find(u => u.uid === activeChatUser.uid);
             if (updatedActive) {
                 activeChatUser = updatedActive;
@@ -548,8 +560,34 @@ function setupUsersListener() {
     });
 }
 
+function setupGroupsListener() {
+    if (unsubscribeGroups) unsubscribeGroups();
+    unsubscribeGroups = db.collection("groups")
+        .where("members", "array-contains", auth.currentUser.uid)
+        .onSnapshot((snapshot) => {
+            allGroups = [];
+            snapshot.forEach(doc => {
+                allGroups.push({ uid: doc.id, ...doc.data(), isGroup: true });
+            });
+            renderContacts();
+            if (activeChatUser && activeChatUser.isGroup) {
+                const updatedActive = allGroups.find(g => g.uid === activeChatUser.uid);
+                if (updatedActive) {
+                    activeChatUser = updatedActive;
+                    updateHeaderStatus();
+                }
+            }
+        });
+}
+
 function updateHeaderStatus() {
     if (!activeChatUser) return;
+
+    if (activeChatUser.isGroup) {
+        chatStatus.textContent = `${activeChatUser.members.length} miembros`;
+        chatStatus.classList.remove('online');
+        return;
+    }
 
     if (activeChatUser.status === "online") {
         chatStatus.textContent = "en línea";
@@ -618,40 +656,49 @@ btnLogout.addEventListener('click', async () => {
 
 function renderContacts() {
     contactList.innerHTML = '';
-    allUsers.forEach(user => {
+
+    // Merge Users and Groups
+    const combined = [...allGroups, ...allUsers];
+
+    combined.forEach(entity => {
+        const isGroup = entity.isGroup;
         const chatNotes = allMessages.filter(m =>
-            (m.senderId === auth.currentUser.uid && m.receiverId === user.uid) ||
-            (m.senderId === user.uid && m.receiverId === auth.currentUser.uid)
+            isGroup ? (m.groupId === entity.uid) :
+                ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) ||
+                    (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
         );
-        let lastText = "Haz clic para chatear", lastTime = "";
+        let lastText = isGroup ? "Grupo creado" : "Haz clic para chatear", lastTime = "";
         if (chatNotes.length > 0) {
             const last = chatNotes[chatNotes.length - 1];
             lastText = last.text; lastTime = last.time;
         }
         const item = document.createElement('div');
         item.className = 'contact-item';
-        if (activeChatUser && activeChatUser.uid === user.uid) item.classList.add('active');
-        const roleClass = `role-${user.role}`;
+        if (activeChatUser && activeChatUser.uid === entity.uid) item.classList.add('active');
 
-        const isOnline = user.status === "online";
-        const indicator = isOnline ? '<div class="online-indicator"></div>' : '';
+        const avatar = isGroup ?
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+
+        const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
+        const badge = isGroup ? '<span class="group-badge">Grupo</span>' : `<span class="role-badge role-${entity.role}">${entity.role}</span>`;
 
         item.innerHTML = `
             ${indicator}
-            <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff">
+            <img src="${avatar}">
             <div class="contact-info">
                 <div class="contact-name-time">
-                    <span class="contact-name">${user.name} <span class="role-badge ${roleClass}">${user.role}</span></span>
+                    <span class="contact-name">${entity.name} ${badge}</span>
                     <span class="contact-time">${lastTime}</span>
                 </div>
                 <div class="contact-message">${lastText}</div>
             </div>`;
         item.addEventListener('click', () => {
-            activeChatUser = user;
+            activeChatUser = entity;
             document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            activeContactName.textContent = user.name;
-            activeContactImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
+            activeContactName.textContent = entity.name;
+            activeContactImg.src = avatar;
             chatHeaderInfo.classList.add('active');
             chatHeaderText.classList.add('active');
             welcomeMessage.style.display = 'none';
@@ -667,23 +714,34 @@ function renderContacts() {
 function renderMessages() {
     Array.from(chatMessages.children).forEach(c => { if (c.id !== 'welcome-message') c.remove(); });
     if (!activeChatUser) return;
-    allMessages.filter(m => (m.senderId === auth.currentUser.uid && m.receiverId === activeChatUser.uid) || (m.senderId === activeChatUser.uid && m.receiverId === auth.currentUser.uid))
-        .forEach(msg => {
-            const el = document.createElement('div');
-            el.className = `message ${msg.senderId === auth.currentUser.uid ? 'sent' : 'received'}`;
-            if (msg.type === 'call') {
-                el.innerHTML = `<i class="fas fa-video" style="margin-right:8px;"></i> ${msg.text}<span class="time">${msg.time}</span>`;
-                el.style.backgroundColor = 'var(--primary)';
-                el.style.cursor = 'pointer';
-                el.onclick = () => {
-                    const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
-                    startCall(msg.audioOnly || false, true, caller);
-                };
-            } else {
-                el.innerHTML = `${msg.text}<span class="time">${msg.time}</span>`;
-            }
-            chatMessages.appendChild(el);
-        });
+
+    const messagesToShow = activeChatUser.isGroup ?
+        allMessages.filter(m => m.groupId === activeChatUser.uid) :
+        allMessages.filter(m => (m.senderId === auth.currentUser.uid && m.receiverId === activeChatUser.uid) || (m.senderId === activeChatUser.uid && m.receiverId === auth.currentUser.uid));
+
+    messagesToShow.forEach(msg => {
+        const el = document.createElement('div');
+        el.className = `message ${msg.senderId === auth.currentUser.uid ? 'sent' : 'received'}`;
+
+        let senderName = "";
+        if (activeChatUser.isGroup && msg.senderId !== auth.currentUser.uid) {
+            const sender = allUsers.find(u => u.uid === msg.senderId);
+            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${sender ? sender.name : 'Unknown'}</div>`;
+        }
+
+        if (msg.type === 'call') {
+            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${msg.text}<span class="time">${msg.time}</span>`;
+            el.style.backgroundColor = 'var(--primary)';
+            el.style.cursor = 'pointer';
+            el.onclick = () => {
+                const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
+                startCall(msg.audioOnly || false, true, caller);
+            };
+        } else {
+            el.innerHTML = `${senderName}${msg.text}<span class="time">${msg.time}</span>`;
+        }
+        chatMessages.appendChild(el);
+    });
     setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
 }
 
@@ -696,15 +754,72 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
     const now = new Date();
     const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     if (!overrideText) messageInput.value = '';
+
+    const messageData = {
+        senderId: auth.currentUser.uid,
+        text: text,
+        type: type,
+        audioOnly: audioOnly,
+        time: time,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (activeChatUser.isGroup) {
+        messageData.groupId = activeChatUser.uid;
+    } else {
+        messageData.receiverId = activeChatUser.uid;
+    }
+
     try {
-        await db.collection("messages").add({
-            senderId: auth.currentUser.uid,
-            receiverId: activeChatUser.uid,
-            text: text,
-            type: type,
-            audioOnly: audioOnly,
-            time: time,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        await db.collection("messages").add(messageData);
     } catch (e) { console.error(e); }
 }
+
+// --- Group Management Logic ---
+
+btnNewGroup.addEventListener('click', () => {
+    groupModal.classList.add('active');
+    renderMemberSelection();
+});
+
+closeGroupModal.addEventListener('click', () => groupModal.classList.remove('active'));
+
+function renderMemberSelection() {
+    memberSelectionList.innerHTML = '';
+    allUsers.forEach(user => {
+        const item = document.createElement('div');
+        item.className = 'member-item';
+        item.innerHTML = `
+            <input type="checkbox" id="check-${user.uid}" value="${user.uid}">
+            <label for="check-${user.uid}">${user.name} (${user.email})</label>
+        `;
+        memberSelectionList.appendChild(item);
+    });
+}
+
+btnCreateGroupSubmit.addEventListener('click', async () => {
+    const name = groupNameInput.value.trim();
+    if (!name) return alert("Por favor, ponle un nombre al grupo.");
+
+    const selectedMembers = Array.from(memberSelectionList.querySelectorAll('input:checked'))
+        .map(input => input.value);
+
+    if (selectedMembers.length === 0) return alert("Selecciona al menos un miembro.");
+
+    // Include self
+    selectedMembers.push(auth.currentUser.uid);
+
+    try {
+        await db.collection("groups").add({
+            name: name,
+            members: selectedMembers,
+            createdBy: auth.currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        groupModal.classList.remove('active');
+        groupNameInput.value = '';
+        alert("¡Grupo creado con éxito!");
+    } catch (e) {
+        alert("Error creando grupo: " + e.message);
+    }
+});

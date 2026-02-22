@@ -70,8 +70,7 @@
                     <div class="header-actions">
                         <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
                             title="Panel de Administración"></i>
-                        <i class="fas fa-circle-notch"></i>
-                        <i class="fas fa-message"></i>
+                        <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
                         <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
                     </div>
                 </div>
@@ -88,6 +87,29 @@
                 </div>
             </div>
 
+            <!-- Group Creation Modal -->
+            <div id="group-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Crear Nuevo Grupo</h2>
+                        <i class="fas fa-times" id="close-group-modal"></i>
+                    </div>
+                    <div class="modal-body">
+                        <div class="group-form">
+                            <div class="input-group">
+                                <i class="fas fa-users"></i>
+                                <input type="text" id="group-name" placeholder="Nombre del grupo" required>
+                            </div>
+                            <h3>Selecciona los miembros:</h3>
+                            <div class="member-selection-list" id="member-selection-list">
+                                <!-- Contact list with checkboxes will be here -->
+                            </div>
+                            <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear
+                                Grupo</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <!-- Admin Panel Modal -->
             <div id="admin-modal" class="modal">
                 <div class="modal-content">
