@@ -723,13 +723,20 @@ body {
     justify-content: space-between;
     align-items: center;
     background-color: var(--bg-panel);
-    padding: 10px;
+    padding: 10px 14px;
     border-radius: 6px;
+    transition: opacity 0.3s;
 }
 
 .admin-user-item i {
-    color: #ff5252;
     cursor: pointer;
+    font-size: 16px;
+}
+
+.user-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
 }
 
 .chat-header {
