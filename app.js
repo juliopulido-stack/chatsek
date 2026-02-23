@@ -914,6 +914,9 @@ function renderContacts() {
         const roleClass = `role-${entity.role}`;
         const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
 
+        const unreadCount = getUnreadCount(entity);
+        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
+
         item.innerHTML = `
             ${indicator}
             <img src="${avatar}">
@@ -925,7 +928,10 @@ function renderContacts() {
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
                     </div>
                 </div>
-                <div class="contact-message">${lastText}</div>
+                <div class="contact-message-row">
+                    <div class="contact-message">${lastText}</div>
+                    ${unreadBadge}
+                </div>
             </div>`;
 
         // Handle Pin Toggle
@@ -945,9 +951,11 @@ function renderContacts() {
             chatHeaderText.classList.add('active');
             welcomeMessage.style.display = 'none';
             chatInputArea.style.display = 'flex';
+            document.getElementById('chat-header-actions').style.display = 'flex';
 
             updateHeaderStatus();
             renderMessages();
+            markMessagesAsRead(entity);
 
             // Mobile view toggle
             if (window.innerWidth <= 768) {
@@ -1035,7 +1043,8 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         type: type,
         audioOnly: audioOnly,
         time: time,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        readBy: [auth.currentUser.uid] // Sender has already "read" it
     };
 
     if (activeChatUser.isGroup) {
@@ -1047,6 +1056,41 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
     try {
         await db.collection("messages").add(messageData);
     } catch (e) { console.error(e); }
+}
+
+// --- Unread / Read Logic ---
+
+async function markMessagesAsRead(entity) {
+    if (!auth.currentUser || !entity) return;
+    const uid = auth.currentUser.uid;
+
+    const unread = allMessages.filter(m => {
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid && m.senderId !== uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        const alreadyRead = m.readBy && m.readBy.includes(uid);
+        return isForMe && !alreadyRead;
+    });
+
+    const batch = db.batch();
+    unread.forEach(m => {
+        const ref = db.collection("messages").doc(m.id);
+        batch.update(ref, { readBy: firebase.firestore.FieldValue.arrayUnion(uid) });
+    });
+    if (unread.length > 0) await batch.commit();
+}
+
+function getUnreadCount(entity) {
+    if (!auth.currentUser) return 0;
+    const uid = auth.currentUser.uid;
+
+    return allMessages.filter(m => {
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid && m.senderId !== uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        const alreadyRead = m.readBy && m.readBy.includes(uid);
+        return isForMe && !alreadyRead;
+    }).length;
 }
 
 // --- Group Management Logic ---
@@ -1206,6 +1250,7 @@ function openChatWith(entity) {
 
     updateHeaderStatus();
     renderMessages();
+    markMessagesAsRead(entity);
 
     if (window.innerWidth <= 768) {
         appContainer.classList.add('show-chat');
