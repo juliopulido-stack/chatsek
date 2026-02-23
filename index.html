@@ -109,7 +109,7 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 2.23</div>
+                    <div class="app-version-sidebar">Version 2.24</div>
                 </div>
             </div>
 
@@ -245,8 +245,18 @@
                     <div class="input-container">
                         <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
                     </div>
-                    <i class="fas fa-microphone" id="voice-btn"></i>
+                    <div id="voice-btn" class="voice-btn" title="Mantén pulsado para grabar">
+                        <i class="fas fa-microphone"></i>
+                    </div>
                     <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
+                </div>
+
+                <!-- Recording indicator -->
+                <div id="recording-bar" class="recording-bar" style="display:none;">
+                    <span class="recording-dot"></span>
+                    <span id="recording-timer">0:00</span>
+                    <span style="flex:1; color: var(--text-secondary); font-size:13px;">Grabando... suelta para enviar</span>
+                    <i class="fas fa-times" id="cancel-recording" title="Cancelar"></i>
                 </div>
             </div>
 
