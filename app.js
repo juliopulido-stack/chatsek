@@ -290,10 +290,14 @@ async function handleUserLogin(user) {
             await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
         }
 
+        // Check Disabled Status
+        if (currentUserData.disabled === true) {
+            showBanScreen("Cuenta Desactivada", "Tu cuenta ha sido desactivada por un administrador. Contacta con un SuperAdmin para solicitar el acceso.");
+            return;
+        }
+
         // Check Ban Status
         if (checkBanStatus(currentUserData)) {
-            // If banned, the checkBanStatus function will display the ban screen
-            // and we should prevent further login process.
             return;
         }
         await updateUserStatus("online");
@@ -622,35 +626,47 @@ function renderAdminUserList() {
         const item = document.createElement('div');
         item.className = 'admin-user-item';
         const roleClass = `role-${user.role}`;
+        const isSelf = user.uid === auth.currentUser.uid;
+        const isSuperAdmin = currentUserData.role === 'super_admin';
+        const targetIsSuperAdmin = user.role === 'super_admin';
+        const isDisabled = user.disabled === true;
 
         let actions = `<div class="user-actions">`;
-        let canEdit = (currentUserData.role === 'super_admin') || (currentUserData.role === 'admin' && user.role === 'usuario');
 
-        if (canEdit) {
-            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary); margin-right: 15px;" title="Editar"></i>`;
+        // Editar: solo super_admin puede editar a cualquiera
+        if (isSuperAdmin) {
+            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary);" title="Editar"></i>`;
         }
 
-        const isSuperAdmin = currentUserData.role === 'super_admin';
-        const isAdmin = currentUserData.role === 'admin';
-        const targetIsUsuario = user.role === 'usuario';
-        const isNotSelf = user.uid !== auth.currentUser.uid;
+        // Encender/Apagar: solo super_admin, no puede apagarse a sí mismo ni a otros super_admin
+        if (isSuperAdmin && !isSelf && !targetIsSuperAdmin) {
+            const powerColor = isDisabled ? '#22c55e' : '#f43f5e';
+            const powerIcon = isDisabled ? 'fa-toggle-on' : 'fa-toggle-off';
+            const powerTitle = isDisabled ? 'Activar usuario' : 'Desactivar usuario';
+            actions += `<i class="fas ${powerIcon}" onclick="toggleUserDisabled('${user.uid}', ${isDisabled})" style="color: ${powerColor}; font-size: 20px;" title="${powerTitle}"></i>`;
+        }
 
-        if (currentUserData.role === 'super_admin' && user.uid !== auth.currentUser.uid) {
-            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="margin-left: 15px;" title="Borrar"></i>`;
+        // Borrar y resetear strikes: solo super_admin, no puede borrarse a sí mismo
+        if (isSuperAdmin && !isSelf) {
+            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: #f43f5e;" title="Borrar"></i>`;
             if (user.strikes > 0 || user.banUntil) {
-                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981; margin-left: 15px;" title="Resetear Faltas"></i>`;
+                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981;" title="Resetear Faltas"></i>`;
             }
         }
 
         actions += `</div>`;
 
+        const disabledBadge = isDisabled ? `<span class="role-badge" style="background:#f43f5e;">desactivado</span>` : '';
+
         item.innerHTML = `
             <div>
-                <strong>${user.name}</strong> (${user.email})
+                <strong>${user.name}</strong> <span style="font-size:12px;color:var(--text-secondary)">(${user.email})</span>
                 <span class="role-badge ${roleClass}">${user.role}</span>
+                ${disabledBadge}
             </div>
             ${actions}
         `;
+        if (isDisabled) item.style.opacity = '0.5';
         adminUserList.appendChild(item);
     });
 }
@@ -687,6 +703,19 @@ window.deleteUser = async (uid) => {
     try {
         await db.collection("users").doc(uid).delete();
         alert("Usuario eliminado.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.toggleUserDisabled = async (uid, currentlyDisabled) => {
+    const action = currentlyDisabled ? 'activar' : 'desactivar';
+    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            disabled: !currentlyDisabled
+        });
+        renderAdminUserList();
     } catch (e) {
         alert("Error: " + e.message);
     }
