@@ -302,6 +302,14 @@ async function handleUserLogin(user) {
     setupMessagesListener();
     showChatScreen();
     startIdleMonitoring();
+    requestNotificationPermission();
+
+    // Update lastSeen every 10 minutes while active
+    setInterval(() => {
+        if (auth.currentUser && document.visibilityState === 'visible') {
+            updateUserStatus("online");
+        }
+    }, 10 * 60 * 1000);
 }
 
 // --- Inactivity Logic ---
@@ -795,16 +803,33 @@ function updateHeaderStatus() {
     }
 
     if (activeChatUser.status === "online") {
-        chatStatus.textContent = "en línea";
+        chatStatus.innerHTML = `<span class="status-dot"></span> en línea`;
         chatStatus.classList.add('online');
     } else {
         chatStatus.classList.remove('online');
         if (activeChatUser.lastSeen) {
             const date = activeChatUser.lastSeen.toDate();
-            const time = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-            chatStatus.textContent = `últ. vez hoy a las ${time}`;
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            let timeStr;
+            if (diffMins < 1) {
+                timeStr = 'hace un momento';
+            } else {
+                const hh = date.getHours().toString().padStart(2, '0');
+                const mm = date.getMinutes().toString().padStart(2, '0');
+                const isToday = date.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = date.toDateString() === yesterday.toDateString();
+
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${date.getDate()}/${date.getMonth()+1} a las ${hh}:${mm}`;
+            }
+            chatStatus.textContent = `última vez ${timeStr}`;
         } else {
-            chatStatus.textContent = "desconectado";
+            chatStatus.textContent = 'desconectado';
         }
     }
 }
@@ -812,22 +837,41 @@ function updateHeaderStatus() {
 function setupMessagesListener() {
     unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
         .onSnapshot((snapshot) => {
-            const newMessages = [];
             snapshot.docChanges().forEach(change => {
                 if (change.type === "added") {
                     const msg = { id: change.doc.id, ...change.doc.data() };
+                    const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                    const isNew = msgTime > listenerStartTime;
 
                     // Detect Incoming Call
                     if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
-                        // FILTER: Only handle if the message is really new (within last 30s)
-                        // This prevents "ghost calls" from old documents in Firestore
-                        const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
                         const thirtySecondsAgo = Date.now() - 30000;
-
-                        if (msgTime > thirtySecondsAgo && msgTime > listenerStartTime) {
+                        if (msgTime > thirtySecondsAgo && isNew) {
                             handleIncomingCall(msg);
-                        } else {
-                            console.log("Ignorando llamada antigua del:", new Date(msgTime).toLocaleTimeString());
+                        }
+                    }
+
+                    // Browser notification for new messages (not from self, not calls)
+                    if (isNew && msg.senderId !== auth.currentUser.uid && msg.type !== 'call') {
+                        const isDirectToMe = msg.receiverId === auth.currentUser.uid;
+                        const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
+
+                        if (isDirectToMe || isGroupWithMe) {
+                            // Auto-read if the chat is currently open and the tab is visible
+                            const chatIsOpen = activeChatUser && (
+                                activeChatUser.uid === msg.senderId ||
+                                (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
+                            );
+
+                            if (chatIsOpen && document.visibilityState === 'visible') {
+                                // Mark as read immediately in Firestore
+                                db.collection("messages").doc(msg.id).update({
+                                    readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
+                                });
+                            } else {
+                                // Show browser notification
+                                sendBrowserNotification(msg);
+                            }
                         }
                     }
                 }
@@ -840,6 +884,41 @@ function setupMessagesListener() {
             renderContacts();
             if (activeChatUser) renderMessages();
         });
+}
+
+// --- Browser Notifications ---
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+function sendBrowserNotification(msg) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return; // Only when tab is hidden
+
+    const sender = allUsers.find(u => u.uid === msg.senderId);
+    const senderName = sender ? sender.name : 'Alguien';
+
+    let body = msg.text;
+    if (msg.type === 'image') body = '📷 Imagen';
+    if (msg.type === 'file') body = '📎 Archivo';
+
+    const notification = new Notification(`💬 ${senderName} te ha escrito`, {
+        body: body,
+        icon: `https://ui-avatars.com/api/?name=${encodeURIComponent(senderName)}&background=00a884&color=fff&size=64`,
+        badge: `https://ui-avatars.com/api/?name=SEK&background=00a884&color=fff&size=32`,
+        tag: msg.senderId // Agrupa notificaciones del mismo usuario
+    });
+
+    notification.onclick = () => {
+        window.focus();
+        notification.close();
+        if (sender) openChatWith(sender);
+    };
+
+    // Auto-cerrar a los 5 segundos
+    setTimeout(() => notification.close(), 5000);
 }
 
 loginForm.addEventListener('submit', async (e) => {
