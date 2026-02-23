@@ -82,23 +82,33 @@ function startRecording() {
     recordingSeconds = 0;
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        // Intentar webm primero, luego ogg, luego el que soporte
+        // Máxima compresión: mono, 16kbps
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus'
             : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
                 ? 'audio/ogg;codecs=opus'
                 : '';
 
-        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+        const options = { audioBitsPerSecond: 16000 };
+        if (mimeType) options.mimeType = mimeType;
+
+        mediaRecorder = new MediaRecorder(stream, options);
         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstop = async () => {
             stream.getTracks().forEach(t => t.stop());
             stopRecordingUI();
-            if (recordingCancelled) return;
-            if (audioChunks.length === 0) return;
+            if (recordingCancelled || audioChunks.length === 0) return;
 
-            const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            const mimeUsed = mediaRecorder.mimeType || 'audio/webm';
+            const blob = new Blob(audioChunks, { type: mimeUsed });
+
+            // Verificar tamaño — Firestore permite ~900KB por campo
+            if (blob.size > 900 * 1024) {
+                alert("⚠️ El audio es demasiado largo. Máximo 30 segundos.");
+                return;
+            }
+
             const reader = new FileReader();
             reader.onload = async (e) => {
                 await sendMessage(e.target.result, 'audio');
@@ -131,8 +141,8 @@ function startRecordingUI() {
         const m = Math.floor(recordingSeconds / 60);
         const s = recordingSeconds % 60;
         recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
-        // Límite de 2 minutos
-        if (recordingSeconds >= 120) stopRecording(false);
+        // Límite de 30 segundos
+        if (recordingSeconds >= 30) stopRecording(false);
     }, 1000);
 }
 
@@ -1230,7 +1240,11 @@ function renderMessages() {
                 ${senderName}
                 <div class="audio-message">
                     <i class="fas fa-microphone audio-icon"></i>
-                    <audio controls src="${msg.text}" preload="metadata" style="max-width:200px; height:36px;"></audio>
+                    <audio controls preload="metadata">
+                        <source src="${msg.text}" type="audio/webm">
+                        <source src="${msg.text}" type="audio/ogg">
+                        <source src="${msg.text}" type="audio/mp4">
+                    </audio>
                 </div>
                 <span class="time">${msg.time}</span>`;
         } else {
