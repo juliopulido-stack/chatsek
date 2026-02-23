@@ -109,7 +109,7 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 2.31</div>
+                    <div class="app-version-sidebar">Version 2.32</div>
                 </div>
             </div>
 
@@ -256,8 +256,8 @@
                     <span class="recording-dot"></span>
                     <span id="recording-timer">0:00</span>
                     <span style="flex:1; color: var(--text-secondary); font-size:13px;">Grabando... (máx. 30s)</span>
-                    <i class="fas fa-times" id="cancel-recording" title="Cancelar"></i>
-                    <i class="fas fa-paper-plane" id="send-recording" title="Enviar audio" style="color: var(--primary); font-size:22px; cursor:pointer; margin-left:4px;"></i>
+                    <button id="cancel-recording" class="rec-btn rec-btn-cancel" title="Cancelar"><i class="fas fa-times"></i></button>
+                    <button id="send-recording" class="rec-btn rec-btn-send" title="Enviar audio"><i class="fas fa-paper-plane"></i></button>
                 </div>
             </div>
 
