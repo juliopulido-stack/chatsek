@@ -179,17 +179,30 @@ voiceBtn.addEventListener('click', (e) => {
     }
 });
 
-// Botón enviar audio y cancelar — delegación porque el DOM puede no estar listo
-document.addEventListener('click', (e) => {
-    if (e.target.closest('#send-recording')) {
-        isRecording = false;
-        stopRecording(false);
+// Botones de grabación — se asignan con onclick para evitar problemas de timing
+function initRecordingButtons() {
+    const btnSend = document.getElementById('send-recording');
+    const btnCancel = document.getElementById('cancel-recording');
+    if (btnSend) {
+        btnSend.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isRecording = false;
+            stopRecording(false);
+        };
     }
-    if (e.target.closest('#cancel-recording')) {
-        isRecording = false;
-        stopRecording(true);
+    if (btnCancel) {
+        btnCancel.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isRecording = false;
+            stopRecording(true);
+        };
     }
-});
+}
+// Llamar al inicio y también cuando se muestre el chat
+document.addEventListener('DOMContentLoaded', initRecordingButtons);
+setTimeout(initRecordingButtons, 1000);
 
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
