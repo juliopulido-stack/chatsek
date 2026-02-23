@@ -1139,7 +1139,7 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
 
 // --- Unread / Read Logic ---
 
-async function markMessagesAsRead(entity) {
+function markMessagesAsRead(entity) {
     if (!auth.currentUser || !entity) return;
     const uid = auth.currentUser.uid;
 
@@ -1151,13 +1151,25 @@ async function markMessagesAsRead(entity) {
         return isForMe && !alreadyRead;
     });
 
+    if (unread.length === 0) return;
+
+    // Actualizar array local INMEDIATAMENTE → badge desaparece al instante
+    unread.forEach(m => {
+        if (!m.readBy) m.readBy = [];
+        if (!m.readBy.includes(uid)) m.readBy.push(uid);
+    });
+    renderContacts();
+
+    // Persistir en Firestore en segundo plano
     const batch = db.batch();
     unread.forEach(m => {
-        const ref = db.collection("messages").doc(m.id);
-        batch.update(ref, { readBy: firebase.firestore.FieldValue.arrayUnion(uid) });
+        batch.update(db.collection("messages").doc(m.id), {
+            readBy: firebase.firestore.FieldValue.arrayUnion(uid)
+        });
     });
-    if (unread.length > 0) await batch.commit();
+    batch.commit().catch(e => console.error("Error marking as read:", e));
 }
+
 
 function getUnreadCount(entity) {
     if (!auth.currentUser) return 0;
