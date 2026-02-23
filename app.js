@@ -116,7 +116,7 @@ function startRecording() {
             reader.readAsDataURL(blob);
         };
 
-        mediaRecorder.start();
+        mediaRecorder.start(1000); // chunk cada segundo
         startRecordingUI();
 
     }).catch(() => {
@@ -127,6 +127,8 @@ function startRecording() {
 function stopRecording(cancel = false) {
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
     recordingCancelled = cancel;
+    // Forzar que entregue todos los datos grabados antes de parar
+    try { mediaRecorder.requestData(); } catch(e) {}
     mediaRecorder.stop();
 }
 
