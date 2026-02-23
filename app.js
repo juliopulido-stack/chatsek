@@ -29,6 +29,7 @@ let unsubscribeGroups = null;
 let editingUserId = null;
 let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
+let readMessageIds = new Set();   // IDs de mensajes ya leídos localmente
 let listenerStartTime = Date.now(); // Used to filter out old messages upon login
 
 // Inactivity Settings
@@ -864,7 +865,8 @@ function setupMessagesListener() {
                             );
 
                             if (chatIsOpen && document.visibilityState === 'visible') {
-                                // Mark as read immediately in Firestore
+                                // Marcar en Set local Y en Firestore
+                                readMessageIds.add(msg.id);
                                 db.collection("messages").doc(msg.id).update({
                                     readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
                                 });
@@ -879,7 +881,12 @@ function setupMessagesListener() {
 
             allMessages = [];
             snapshot.forEach((doc) => {
-                allMessages.push({ id: doc.id, ...doc.data() });
+                const msg = { id: doc.id, ...doc.data() };
+                allMessages.push(msg);
+                // Si Firestore ya tiene este mensaje como leído por mí, añadirlo al Set local
+                if (msg.readBy && auth.currentUser && msg.readBy.includes(auth.currentUser.uid)) {
+                    readMessageIds.add(msg.id);
+                }
             });
             renderContacts();
             if (activeChatUser) renderMessages();
@@ -1144,21 +1151,18 @@ function markMessagesAsRead(entity) {
     const uid = auth.currentUser.uid;
 
     const unread = allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
         const isForMe = entity.isGroup
             ? (m.groupId === entity.uid && m.senderId !== uid)
             : (m.receiverId === uid && m.senderId === entity.uid);
-        const alreadyRead = m.readBy && m.readBy.includes(uid);
-        return isForMe && !alreadyRead;
+        return isForMe;
     });
 
     if (unread.length === 0) return;
 
-    // Actualizar array local INMEDIATAMENTE → badge desaparece al instante
-    unread.forEach(m => {
-        if (!m.readBy) m.readBy = [];
-        if (!m.readBy.includes(uid)) m.readBy.push(uid);
-    });
-    renderContacts();
+    // Marcar en el Set local INMEDIATAMENTE — nunca se borra aunque Firestore tarde
+    unread.forEach(m => readMessageIds.add(m.id));
+    renderContacts(); // Badge desaparece al instante
 
     // Persistir en Firestore en segundo plano
     const batch = db.batch();
@@ -1170,15 +1174,17 @@ function markMessagesAsRead(entity) {
     batch.commit().catch(e => console.error("Error marking as read:", e));
 }
 
-
 function getUnreadCount(entity) {
     if (!auth.currentUser) return 0;
     const uid = auth.currentUser.uid;
 
     return allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        if (m.senderId === uid) return false;
         const isForMe = entity.isGroup
-            ? (m.groupId === entity.uid && m.senderId !== uid)
+            ? (m.groupId === entity.uid)
             : (m.receiverId === uid && m.senderId === entity.uid);
+        // Considerar leídos los que ya tienen nuestro uid en readBy (de sesiones anteriores)
         const alreadyRead = m.readBy && m.readBy.includes(uid);
         return isForMe && !alreadyRead;
     }).length;
