@@ -153,17 +153,25 @@ function stopRecordingUI() {
     voiceBtn.classList.remove('recording');
 }
 
-// Mantener pulsado en escritorio
-voiceBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
-voiceBtn.addEventListener('mouseup', () => stopRecording(false));
-voiceBtn.addEventListener('mouseleave', () => stopRecording(false));
-
-// Mantener pulsado en móvil
-voiceBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
-voiceBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(false); });
+// Clic para empezar/parar grabación
+let isRecording = false;
+voiceBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isRecording) {
+        isRecording = true;
+        startRecording();
+    } else {
+        isRecording = false;
+        stopRecording(false);
+    }
+});
 
 // Cancelar grabación
-cancelRecording.addEventListener('click', () => stopRecording(true));
+cancelRecording.addEventListener('click', () => {
+    isRecording = false;
+    stopRecording(true);
+});
 
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
@@ -1113,7 +1121,12 @@ function renderContacts() {
         let lastText = isGroup ? "Grupo creado" : "Haz clic para chatear", lastTime = "";
         if (chatNotes.length > 0) {
             const last = chatNotes[chatNotes.length - 1];
-            lastText = last.text; lastTime = last.time;
+            lastTime = last.time;
+            if (last.type === 'audio') lastText = '🎤 Audio';
+            else if (last.type === 'image') lastText = '📷 Imagen';
+            else if (last.type === 'file') lastText = '📎 Archivo';
+            else if (last.type === 'call') lastText = '📞 Llamada';
+            else lastText = last.text;
         }
 
         const item = document.createElement('div');
