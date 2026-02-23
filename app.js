@@ -426,10 +426,16 @@ function showLoginScreen() {
     loginScreen.classList.add('active');
 }
 
+// --- Alias / Display Name Helper ---
+function getDisplayName(user) {
+    return (user && user.alias && user.alias.trim()) ? user.alias.trim() : user.name;
+}
+
 function showChatScreen() {
-    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUserData.name)}&background=00a884&color=fff&size=100`;
+    const displayName = getDisplayName(currentUserData);
+    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=00a884&color=fff&size=100`;
     const roleClass = `role-${currentUserData.role}`;
-    currentUserName.innerHTML = `${currentUserData.name} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
+    currentUserName.innerHTML = `${displayName} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
 
     btnAdminPanel.style.display = (currentUserData.role === 'admin' || currentUserData.role === 'super_admin') ? 'block' : 'none';
 
@@ -1015,7 +1021,7 @@ function renderContacts() {
 
         const avatar = isGroup ?
             `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
         const normalize = (str) => {
@@ -1028,6 +1034,7 @@ function renderContacts() {
         const phoneDisplay = !isGroup && displayPhone ? `<span class="contact-phone">SEK: ${displayPhone}</span>` : '';
         const roleClass = `role-${entity.role}`;
         const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
+        const entityDisplayName = isGroup ? entity.name : getDisplayName(entity);
 
         const unreadCount = getUnreadCount(entity);
         const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
@@ -1037,7 +1044,7 @@ function renderContacts() {
             <img src="${avatar}">
             <div class="contact-info">
                 <div class="contact-name-time">
-                    <span class="contact-name">${entity.name} ${badge} ${phoneDisplay}</span>
+                    <span class="contact-name">${entityDisplayName} ${badge} ${phoneDisplay}</span>
                     <div style="display: flex; align-items: center;">
                         <span class="contact-time">${lastTime}</span>
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
@@ -1060,7 +1067,7 @@ function renderContacts() {
             activeChatUser = entity;
             document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            activeContactName.textContent = entity.name;
+            activeContactName.textContent = isGroup ? entity.name : getDisplayName(entity);
             activeContactImg.src = avatar;
             chatHeaderInfo.classList.add('active');
             chatHeaderText.classList.add('active');
@@ -1363,10 +1370,10 @@ function openChatWith(entity) {
     const items = document.querySelectorAll('.contact-item');
     items.forEach(el => el.classList.remove('active'));
 
-    activeContactName.textContent = entity.name;
+    activeContactName.textContent = entity.isGroup ? entity.name : getDisplayName(entity);
     const avatar = entity.isGroup ?
         `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
     activeContactImg.src = avatar;
 
     chatHeaderInfo.classList.add('active');
@@ -1592,3 +1599,34 @@ if (fileInput) {
         reader.readAsDataURL(file);
     });
 }
+
+// --- Alias Logic ---
+const aliasModal = document.getElementById('alias-modal');
+const aliasInput = document.getElementById('alias-input');
+const btnSaveAlias = document.getElementById('btn-save-alias');
+const btnEditAlias = document.getElementById('btn-edit-alias');
+const closeAliasModal = document.getElementById('close-alias-modal');
+
+btnEditAlias.addEventListener('click', () => {
+    aliasInput.value = currentUserData.alias || '';
+    aliasModal.classList.add('active');
+    setTimeout(() => aliasInput.focus(), 100);
+});
+
+closeAliasModal.addEventListener('click', () => aliasModal.classList.remove('active'));
+
+aliasModal.addEventListener('click', (e) => {
+    if (e.target === aliasModal) aliasModal.classList.remove('active');
+});
+
+btnSaveAlias.addEventListener('click', async () => {
+    const alias = aliasInput.value.trim();
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({ alias });
+        currentUserData.alias = alias;
+        showChatScreen(); // Actualiza el nombre en el sidebar
+        aliasModal.classList.remove('active');
+    } catch (e) {
+        alert("Error guardando alias: " + e.message);
+    }
+});
