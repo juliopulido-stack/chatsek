@@ -64,6 +64,97 @@ const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const voiceBtn = document.getElementById('voice-btn');
 
+// --- Audio Recording Logic ---
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingTimerInterval = null;
+let recordingSeconds = 0;
+let recordingCancelled = false;
+
+const recordingBar = document.getElementById('recording-bar');
+const recordingTimerEl = document.getElementById('recording-timer');
+const cancelRecording = document.getElementById('cancel-recording');
+
+function startRecording() {
+    if (!activeChatUser) return;
+    recordingCancelled = false;
+    audioChunks = [];
+    recordingSeconds = 0;
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        // Intentar webm primero, luego ogg, luego el que soporte
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+                ? 'audio/ogg;codecs=opus'
+                : '';
+
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+
+        mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            stopRecordingUI();
+            if (recordingCancelled) return;
+            if (audioChunks.length === 0) return;
+
+            const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                await sendMessage(e.target.result, 'audio');
+            };
+            reader.readAsDataURL(blob);
+        };
+
+        mediaRecorder.start();
+        startRecordingUI();
+
+    }).catch(() => {
+        alert("No se pudo acceder al micrófono. Comprueba los permisos del navegador.");
+    });
+}
+
+function stopRecording(cancel = false) {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+    recordingCancelled = cancel;
+    mediaRecorder.stop();
+}
+
+function startRecordingUI() {
+    recordingBar.style.display = 'flex';
+    chatInputArea.style.display = 'none';
+    voiceBtn.classList.add('recording');
+    recordingSeconds = 0;
+    recordingTimerEl.textContent = '0:00';
+    recordingTimerInterval = setInterval(() => {
+        recordingSeconds++;
+        const m = Math.floor(recordingSeconds / 60);
+        const s = recordingSeconds % 60;
+        recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+        // Límite de 2 minutos
+        if (recordingSeconds >= 120) stopRecording(false);
+    }, 1000);
+}
+
+function stopRecordingUI() {
+    clearInterval(recordingTimerInterval);
+    recordingBar.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+    voiceBtn.classList.remove('recording');
+}
+
+// Mantener pulsado en escritorio
+voiceBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
+voiceBtn.addEventListener('mouseup', () => stopRecording(false));
+voiceBtn.addEventListener('mouseleave', () => stopRecording(false));
+
+// Mantener pulsado en móvil
+voiceBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
+voiceBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(false); });
+
+// Cancelar grabación
+cancelRecording.addEventListener('click', () => stopRecording(true));
+
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
 const closeAdminModal = document.getElementById('close-admin-modal');
@@ -1134,6 +1225,14 @@ function renderMessages() {
                 const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
                 startCall(msg.audioOnly || false, true, caller);
             };
+        } else if (msg.type === 'audio') {
+            el.innerHTML = `
+                ${senderName}
+                <div class="audio-message">
+                    <i class="fas fa-microphone audio-icon"></i>
+                    <audio controls src="${msg.text}" preload="metadata" style="max-width:200px; height:36px;"></audio>
+                </div>
+                <span class="time">${msg.time}</span>`;
         } else {
             el.innerHTML = `${senderName}${msg.text}<span class="time">${msg.time}</span>`;
         }
