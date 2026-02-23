@@ -1003,14 +1003,23 @@ body {
     min-width: 36px;
 }
 
-#cancel-recording {
-    font-size: 20px;
-    color: #aebac1;
+.rec-btn {
+    border: none;
+    background: transparent;
     cursor: pointer;
-    padding: 6px;
+    padding: 6px 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
 }
 
-#cancel-recording:hover { color: #f43f5e; }
+.rec-btn-cancel { color: #aebac1; font-size: 18px; }
+.rec-btn-cancel:hover { background: rgba(244,63,94,0.15); color: #f43f5e; }
+
+.rec-btn-send { color: var(--primary); font-size: 20px; }
+.rec-btn-send:hover { background: rgba(99,102,241,0.15); }
 
 /* Bubble de mensaje de audio */
 .audio-message {
