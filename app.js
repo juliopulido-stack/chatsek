@@ -153,7 +153,7 @@ function stopRecordingUI() {
     voiceBtn.classList.remove('recording');
 }
 
-// Clic para empezar/parar grabación
+// Clic en micro: empezar o parar grabación (sin enviar)
 let isRecording = false;
 voiceBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -163,8 +163,14 @@ voiceBtn.addEventListener('click', (e) => {
         startRecording();
     } else {
         isRecording = false;
-        stopRecording(false);
+        stopRecording(true); // parar SIN enviar — el botón enviar es el que envía
     }
+});
+
+// Botón enviar audio
+document.getElementById('send-recording').addEventListener('click', () => {
+    isRecording = false;
+    stopRecording(false); // parar Y enviar
 });
 
 // Cancelar grabación
