@@ -1034,6 +1034,7 @@ function renderContacts() {
 
             updateHeaderStatus();
             renderMessages();
+            markMessagesAsRead(entity);
 
             // Mobile view toggle
             if (window.innerWidth <= 768) {
@@ -1133,8 +1134,6 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
 
     try {
         await db.collection("messages").add(messageData);
-        // Al responder, marcamos los mensajes de esa persona como leídos
-        markMessagesAsRead(activeChatUser);
     } catch (e) { console.error(e); }
 }
 
@@ -1330,6 +1329,7 @@ function openChatWith(entity) {
 
     updateHeaderStatus();
     renderMessages();
+    markMessagesAsRead(entity);
 
     if (window.innerWidth <= 768) {
         appContainer.classList.add('show-chat');
