@@ -769,7 +769,9 @@ body {
 .chat-header-text .status {
     font-size: 13px;
     color: var(--text-secondary);
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .status.online {
