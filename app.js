@@ -1,4 +1,3 @@
-
 // Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyChRpWOi8UON6LvU3ERmSNQ04IwtRUoZDc",
@@ -912,6 +911,8 @@ function renderContacts() {
         const cleanName = normalize(entity.name);
         const displayPhone = entity.phoneNumber || reservedNumbers[cleanName] || '';
         const phoneDisplay = !isGroup && displayPhone ? `<span class="contact-phone">SEK: ${displayPhone}</span>` : '';
+        const roleClass = `role-${entity.role}`;
+        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
 
         item.innerHTML = `
             ${indicator}
@@ -1420,6 +1421,3 @@ if (fileInput) {
         reader.readAsDataURL(file);
     });
 }
-
-
-
