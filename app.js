@@ -73,7 +73,7 @@ let recordingCancelled = false;
 
 const recordingBar = document.getElementById('recording-bar');
 const recordingTimerEl = document.getElementById('recording-timer');
-const cancelRecording = document.getElementById('cancel-recording');
+// cancelRecording y send-recording se obtienen lazy porque pueden ser null al cargar
 
 function startRecording() {
     if (!activeChatUser) return;
@@ -82,54 +82,64 @@ function startRecording() {
     recordingSeconds = 0;
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        // Máxima compresión: mono, 16kbps
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-                ? 'audio/ogg;codecs=opus'
-                : '';
 
-        const options = { audioBitsPerSecond: 16000 };
-        if (mimeType) options.mimeType = mimeType;
+        // Elegir el mejor formato disponible
+        const mimeType = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg']
+            .find(t => MediaRecorder.isTypeSupported(t)) || '';
 
-        mediaRecorder = new MediaRecorder(stream, options);
-        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+        try {
+            mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+        } catch(e) {
+            mediaRecorder = new MediaRecorder(stream);
+        }
 
-        mediaRecorder.onstop = async () => {
+        // Recoger chunks continuamente
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+                audioChunks.push(e.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
             stream.getTracks().forEach(t => t.stop());
             stopRecordingUI();
-            if (recordingCancelled || audioChunks.length === 0) return;
 
-            const mimeUsed = mediaRecorder.mimeType || 'audio/webm';
-            const blob = new Blob(audioChunks, { type: mimeUsed });
-
-            // Verificar tamaño — Firestore permite ~900KB por campo
-            if (blob.size > 900 * 1024) {
-                alert("⚠️ El audio es demasiado largo. Máximo 30 segundos.");
+            if (recordingCancelled) return;
+            if (audioChunks.length === 0) {
+                alert("No se grabó nada. Inténtalo de nuevo.");
                 return;
             }
 
+            const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
+            const blob = new Blob(audioChunks, { type: mimeUsed });
+
+            if (blob.size > 900 * 1024) {
+                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
+                return;
+            }
+
+            // Convertir a base64 y enviar
             const reader = new FileReader();
-            reader.onload = async (e) => {
-                await sendMessage(e.target.result, 'audio');
+            reader.onloadend = () => {
+                sendMessage(reader.result, 'audio');
             };
             reader.readAsDataURL(blob);
         };
 
-        mediaRecorder.start(1000); // chunk cada segundo
+        mediaRecorder.start(250); // chunk cada 250ms — más fiable
         startRecordingUI();
 
-    }).catch(() => {
-        alert("No se pudo acceder al micrófono. Comprueba los permisos del navegador.");
+    }).catch((err) => {
+        console.error("Micrófono error:", err);
+        alert("No se pudo acceder al micrófono. Comprueba los permisos.");
     });
 }
 
 function stopRecording(cancel = false) {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+    if (!mediaRecorder) return;
+    if (mediaRecorder.state === 'inactive') return;
     recordingCancelled = cancel;
-    // Forzar que entregue todos los datos grabados antes de parar
-    try { mediaRecorder.requestData(); } catch(e) {}
-    mediaRecorder.stop();
+    mediaRecorder.stop(); // onstop se dispara cuando termina — no tocar nada más
 }
 
 function startRecordingUI() {
@@ -169,16 +179,16 @@ voiceBtn.addEventListener('click', (e) => {
     }
 });
 
-// Botón enviar audio
-document.getElementById('send-recording').addEventListener('click', () => {
-    isRecording = false;
-    stopRecording(false); // parar Y enviar
-});
-
-// Cancelar grabación
-cancelRecording.addEventListener('click', () => {
-    isRecording = false;
-    stopRecording(true);
+// Botón enviar audio y cancelar — delegación porque el DOM puede no estar listo
+document.addEventListener('click', (e) => {
+    if (e.target.closest('#send-recording')) {
+        isRecording = false;
+        stopRecording(false);
+    }
+    if (e.target.closest('#cancel-recording')) {
+        isRecording = false;
+        stopRecording(true);
+    }
 });
 
 // Admin Modal Elements
