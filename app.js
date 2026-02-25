@@ -32,6 +32,13 @@ let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
 let listenerStartTime = Date.now(); // Used to filter out old messages upon login
 
+// Voice Recording State
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let recordingTimer = null;
+let recordingSeconds = 0;
+
 // Inactivity Settings
 let idleTimeout;
 let logoutTimeout;
@@ -1003,6 +1010,8 @@ function renderMessages() {
                 const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
                 startCall(msg.audioOnly || false, true, caller);
             };
+        } else if (msg.type === 'audio') {
+            el.innerHTML = `${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${msg.text}"></audio></div><span class="time">${msg.time}</span>`;
         } else {
             el.innerHTML = `${senderName}${msg.text}<span class="time">${msg.time}</span>`;
         }
@@ -1046,6 +1055,120 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
     try {
         await db.collection("messages").add(messageData);
     } catch (e) { console.error(e); }
+}
+
+// --- Voice Recording Logic ---
+
+voiceBtn.addEventListener('click', startVoiceRecording);
+
+async function startVoiceRecording() {
+    if (isRecording) return;
+    if (!activeChatUser) return;
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        isRecording = true;
+        recordingSeconds = 0;
+
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+        };
+
+        mediaRecorder.start();
+        showRecordingUI();
+    } catch (err) {
+        console.error('Error accessing microphone:', err);
+        alert('No se pudo acceder al micrófono. Revisa los permisos de tu navegador.');
+    }
+}
+
+function showRecordingUI() {
+    // Hide normal input elements
+    chatInputArea.classList.add('recording-mode');
+
+    // Create recording overlay inside input area
+    let recordingOverlay = document.getElementById('voice-recording-overlay');
+    if (!recordingOverlay) {
+        recordingOverlay = document.createElement('div');
+        recordingOverlay.id = 'voice-recording-overlay';
+        recordingOverlay.innerHTML = `
+            <button class="voice-rec-btn cancel" id="voice-cancel-btn" title="Cancelar">
+                <i class="fas fa-trash"></i>
+            </button>
+            <div class="voice-rec-info">
+                <div class="voice-rec-dot"></div>
+                <span id="voice-rec-timer">0:00</span>
+            </div>
+            <button class="voice-rec-btn send" id="voice-send-btn" title="Enviar">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        `;
+        chatInputArea.appendChild(recordingOverlay);
+
+        document.getElementById('voice-cancel-btn').addEventListener('click', cancelVoiceRecording);
+        document.getElementById('voice-send-btn').addEventListener('click', sendVoiceRecording);
+    }
+
+    recordingOverlay.style.display = 'flex';
+
+    // Start timer
+    recordingSeconds = 0;
+    document.getElementById('voice-rec-timer').textContent = '0:00';
+    recordingTimer = setInterval(() => {
+        recordingSeconds++;
+        const mins = Math.floor(recordingSeconds / 60);
+        const secs = recordingSeconds % 60;
+        document.getElementById('voice-rec-timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }, 1000);
+}
+
+function hideRecordingUI() {
+    chatInputArea.classList.remove('recording-mode');
+    const overlay = document.getElementById('voice-recording-overlay');
+    if (overlay) overlay.style.display = 'none';
+    clearInterval(recordingTimer);
+    recordingTimer = null;
+    isRecording = false;
+}
+
+function cancelVoiceRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    audioChunks = [];
+    hideRecordingUI();
+}
+
+function sendVoiceRecording() {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        hideRecordingUI();
+        return;
+    }
+
+    // Override onstop to send the audio
+    const originalOnStop = mediaRecorder.onstop;
+    mediaRecorder.onstop = (e) => {
+        // Call original to stop tracks
+        if (originalOnStop) originalOnStop(e);
+
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+            const base64Audio = reader.result;
+            await sendMessage(base64Audio, 'audio');
+        };
+        reader.readAsDataURL(audioBlob);
+        audioChunks = [];
+    };
+
+    mediaRecorder.stop();
+    hideRecordingUI();
 }
 
 // --- Group Management Logic ---
