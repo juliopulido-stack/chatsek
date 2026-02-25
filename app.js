@@ -1,4 +1,3 @@
-
 // Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyChRpWOi8UON6LvU3ERmSNQ04IwtRUoZDc",
@@ -30,6 +29,7 @@ let unsubscribeGroups = null;
 let editingUserId = null;
 let jitsiApi = null;
 let processedCallIds = new Set(); // To avoid duplicate alerts
+let readMessageIds = new Set();   // IDs de mensajes ya leídos localmente
 let listenerStartTime = Date.now(); // Used to filter out old messages upon login
 
 // Voice Recording State
@@ -70,6 +70,146 @@ const chatInputArea = document.getElementById('chat-input-area');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const voiceBtn = document.getElementById('voice-btn');
+
+// --- Audio Recording Logic ---
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingTimerInterval = null;
+let recordingSeconds = 0;
+let recordingCancelled = false;
+
+const recordingBar = document.getElementById('recording-bar');
+const recordingTimerEl = document.getElementById('recording-timer');
+// cancelRecording y send-recording se obtienen lazy porque pueden ser null al cargar
+
+function startRecording() {
+    if (!activeChatUser) return;
+    recordingCancelled = false;
+    audioChunks = [];
+    recordingSeconds = 0;
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+
+        // Elegir el mejor formato disponible
+        const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
+            .find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+        try {
+            mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+        } catch (e) {
+            mediaRecorder = new MediaRecorder(stream);
+        }
+
+        // Recoger chunks continuamente
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+                audioChunks.push(e.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            stopRecordingUI();
+
+            if (recordingCancelled) return;
+            if (audioChunks.length === 0) {
+                alert("No se grabó nada. Inténtalo de nuevo.");
+                return;
+            }
+
+            const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
+            const blob = new Blob(audioChunks, { type: mimeUsed });
+
+            if (blob.size > 900 * 1024) {
+                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
+                return;
+            }
+
+            // Convertir a base64 y enviar
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                sendMessage(reader.result, 'audio');
+            };
+            reader.readAsDataURL(blob);
+        };
+
+        mediaRecorder.start(250); // chunk cada 250ms — más fiable
+        startRecordingUI();
+
+    }).catch((err) => {
+        console.error("Micrófono error:", err);
+        alert("No se pudo acceder al micrófono. Comprueba los permisos.");
+    });
+}
+
+function stopRecording(cancel = false) {
+    if (!mediaRecorder) return;
+    if (mediaRecorder.state === 'inactive') return;
+    recordingCancelled = cancel;
+    mediaRecorder.stop(); // onstop se dispara cuando termina — no tocar nada más
+}
+
+function startRecordingUI() {
+    recordingBar.style.display = 'flex';
+    chatInputArea.style.display = 'none';
+    voiceBtn.classList.add('recording');
+    recordingSeconds = 0;
+    recordingTimerEl.textContent = '0:00';
+    recordingTimerInterval = setInterval(() => {
+        recordingSeconds++;
+        const m = Math.floor(recordingSeconds / 60);
+        const s = recordingSeconds % 60;
+        recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+        // Límite de 30 segundos
+        if (recordingSeconds >= 30) stopRecording(false);
+    }, 1000);
+}
+
+function stopRecordingUI() {
+    clearInterval(recordingTimerInterval);
+    recordingBar.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+    voiceBtn.classList.remove('recording');
+}
+
+// Clic en micro: empezar o parar grabación (sin enviar)
+let isRecording = false;
+voiceBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isRecording) {
+        isRecording = true;
+        startRecording();
+    } else {
+        isRecording = false;
+        stopRecording(true); // parar SIN enviar — el botón enviar es el que envía
+    }
+});
+
+// Botones de grabación — se asignan con onclick para evitar problemas de timing
+function initRecordingButtons() {
+    const btnSend = document.getElementById('send-recording');
+    const btnCancel = document.getElementById('cancel-recording');
+    if (btnSend) {
+        btnSend.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isRecording = false;
+            stopRecording(false);
+        };
+    }
+    if (btnCancel) {
+        btnCancel.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isRecording = false;
+            stopRecording(true);
+        };
+    }
+}
+// Llamar al inicio y también cuando se muestre el chat
+document.addEventListener('DOMContentLoaded', initRecordingButtons);
+setTimeout(initRecordingButtons, 1000);
 
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
@@ -297,10 +437,14 @@ async function handleUserLogin(user) {
             await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
         }
 
+        // Check Disabled Status
+        if (currentUserData.disabled === true) {
+            showBanScreen("Cuenta Desactivada", "Tu cuenta ha sido desactivada por un administrador. Contacta con un SuperAdmin para solicitar el acceso.");
+            return;
+        }
+
         // Check Ban Status
         if (checkBanStatus(currentUserData)) {
-            // If banned, the checkBanStatus function will display the ban screen
-            // and we should prevent further login process.
             return;
         }
         await updateUserStatus("online");
@@ -310,6 +454,14 @@ async function handleUserLogin(user) {
     setupMessagesListener();
     showChatScreen();
     startIdleMonitoring();
+    requestNotificationPermission();
+
+    // Update lastSeen every 10 minutes while active
+    setInterval(() => {
+        if (auth.currentUser && document.visibilityState === 'visible') {
+            updateUserStatus("online");
+        }
+    }, 10 * 60 * 1000);
 }
 
 // --- Inactivity Logic ---
@@ -421,10 +573,16 @@ function showLoginScreen() {
     loginScreen.classList.add('active');
 }
 
+// --- Alias / Display Name Helper ---
+function getDisplayName(user) {
+    return (user && user.alias && user.alias.trim()) ? user.alias.trim() : user.name;
+}
+
 function showChatScreen() {
-    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUserData.name)}&background=00a884&color=fff&size=100`;
+    const displayName = getDisplayName(currentUserData);
+    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=00a884&color=fff&size=100`;
     const roleClass = `role-${currentUserData.role}`;
-    currentUserName.innerHTML = `${currentUserData.name} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
+    currentUserName.innerHTML = `${displayName} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
 
     btnAdminPanel.style.display = (currentUserData.role === 'admin' || currentUserData.role === 'super_admin') ? 'block' : 'none';
 
@@ -621,35 +779,47 @@ function renderAdminUserList() {
         const item = document.createElement('div');
         item.className = 'admin-user-item';
         const roleClass = `role-${user.role}`;
+        const isSelf = user.uid === auth.currentUser.uid;
+        const isSuperAdmin = currentUserData.role === 'super_admin';
+        const targetIsSuperAdmin = user.role === 'super_admin';
+        const isDisabled = user.disabled === true;
 
         let actions = `<div class="user-actions">`;
-        let canEdit = (currentUserData.role === 'super_admin') || (currentUserData.role === 'admin' && user.role === 'usuario');
 
-        if (canEdit) {
-            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary); margin-right: 15px;" title="Editar"></i>`;
+        // Editar: solo super_admin puede editar a cualquiera
+        if (isSuperAdmin) {
+            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary);" title="Editar"></i>`;
         }
 
-        const isSuperAdmin = currentUserData.role === 'super_admin';
-        const isAdmin = currentUserData.role === 'admin';
-        const targetIsUsuario = user.role === 'usuario';
-        const isNotSelf = user.uid !== auth.currentUser.uid;
+        // Encender/Apagar: solo super_admin, no puede apagarse a sí mismo ni a otros super_admin
+        if (isSuperAdmin && !isSelf && !targetIsSuperAdmin) {
+            const powerColor = isDisabled ? '#22c55e' : '#f43f5e';
+            const powerIcon = isDisabled ? 'fa-toggle-on' : 'fa-toggle-off';
+            const powerTitle = isDisabled ? 'Activar usuario' : 'Desactivar usuario';
+            actions += `<i class="fas ${powerIcon}" onclick="toggleUserDisabled('${user.uid}', ${isDisabled})" style="color: ${powerColor}; font-size: 20px;" title="${powerTitle}"></i>`;
+        }
 
-        if (currentUserData.role === 'super_admin' && user.uid !== auth.currentUser.uid) {
-            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="margin-left: 15px;" title="Borrar"></i>`;
+        // Borrar y resetear strikes: solo super_admin, no puede borrarse a sí mismo
+        if (isSuperAdmin && !isSelf) {
+            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: #f43f5e;" title="Borrar"></i>`;
             if (user.strikes > 0 || user.banUntil) {
-                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981; margin-left: 15px;" title="Resetear Faltas"></i>`;
+                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981;" title="Resetear Faltas"></i>`;
             }
         }
 
         actions += `</div>`;
 
+        const disabledBadge = isDisabled ? `<span class="role-badge" style="background:#f43f5e;">desactivado</span>` : '';
+
         item.innerHTML = `
             <div>
-                <strong>${user.name}</strong> (${user.email})
+                <strong>${user.name}</strong> <span style="font-size:12px;color:var(--text-secondary)">(${user.email})</span>
                 <span class="role-badge ${roleClass}">${user.role}</span>
+                ${disabledBadge}
             </div>
             ${actions}
         `;
+        if (isDisabled) item.style.opacity = '0.5';
         adminUserList.appendChild(item);
     });
 }
@@ -686,6 +856,19 @@ window.deleteUser = async (uid) => {
     try {
         await db.collection("users").doc(uid).delete();
         alert("Usuario eliminado.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.toggleUserDisabled = async (uid, currentlyDisabled) => {
+    const action = currentlyDisabled ? 'activar' : 'desactivar';
+    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            disabled: !currentlyDisabled
+        });
+        renderAdminUserList();
     } catch (e) {
         alert("Error: " + e.message);
     }
@@ -803,16 +986,33 @@ function updateHeaderStatus() {
     }
 
     if (activeChatUser.status === "online") {
-        chatStatus.textContent = "en línea";
+        chatStatus.innerHTML = `<span class="status-dot"></span> en línea`;
         chatStatus.classList.add('online');
     } else {
         chatStatus.classList.remove('online');
         if (activeChatUser.lastSeen) {
             const date = activeChatUser.lastSeen.toDate();
-            const time = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-            chatStatus.textContent = `últ. vez hoy a las ${time}`;
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            let timeStr;
+            if (diffMins < 1) {
+                timeStr = 'hace un momento';
+            } else {
+                const hh = date.getHours().toString().padStart(2, '0');
+                const mm = date.getMinutes().toString().padStart(2, '0');
+                const isToday = date.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = date.toDateString() === yesterday.toDateString();
+
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${date.getDate()}/${date.getMonth() + 1} a las ${hh}:${mm}`;
+            }
+            chatStatus.textContent = `última vez ${timeStr}`;
         } else {
-            chatStatus.textContent = "desconectado";
+            chatStatus.textContent = 'desconectado';
         }
     }
 }
@@ -820,22 +1020,42 @@ function updateHeaderStatus() {
 function setupMessagesListener() {
     unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
         .onSnapshot((snapshot) => {
-            const newMessages = [];
             snapshot.docChanges().forEach(change => {
                 if (change.type === "added") {
                     const msg = { id: change.doc.id, ...change.doc.data() };
+                    const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                    const isNew = msgTime > listenerStartTime;
 
                     // Detect Incoming Call
                     if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
-                        // FILTER: Only handle if the message is really new (within last 30s)
-                        // This prevents "ghost calls" from old documents in Firestore
-                        const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
                         const thirtySecondsAgo = Date.now() - 30000;
-
-                        if (msgTime > thirtySecondsAgo && msgTime > listenerStartTime) {
+                        if (msgTime > thirtySecondsAgo && isNew) {
                             handleIncomingCall(msg);
-                        } else {
-                            console.log("Ignorando llamada antigua del:", new Date(msgTime).toLocaleTimeString());
+                        }
+                    }
+
+                    // Browser notification for new messages (not from self, not calls)
+                    if (isNew && msg.senderId !== auth.currentUser.uid && msg.type !== 'call') {
+                        const isDirectToMe = msg.receiverId === auth.currentUser.uid;
+                        const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
+
+                        if (isDirectToMe || isGroupWithMe) {
+                            // Auto-read if the chat is currently open and the tab is visible
+                            const chatIsOpen = activeChatUser && (
+                                activeChatUser.uid === msg.senderId ||
+                                (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
+                            );
+
+                            if (chatIsOpen && document.visibilityState === 'visible') {
+                                // Marcar en Set local Y en Firestore
+                                readMessageIds.add(msg.id);
+                                db.collection("messages").doc(msg.id).update({
+                                    readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
+                                });
+                            } else {
+                                // Show browser notification
+                                sendBrowserNotification(msg);
+                            }
                         }
                     }
                 }
@@ -843,11 +1063,51 @@ function setupMessagesListener() {
 
             allMessages = [];
             snapshot.forEach((doc) => {
-                allMessages.push({ id: doc.id, ...doc.data() });
+                const msg = { id: doc.id, ...doc.data() };
+                allMessages.push(msg);
+                // Si Firestore ya tiene este mensaje como leído por mí, añadirlo al Set local
+                if (msg.readBy && auth.currentUser && msg.readBy.includes(auth.currentUser.uid)) {
+                    readMessageIds.add(msg.id);
+                }
             });
             renderContacts();
             if (activeChatUser) renderMessages();
         });
+}
+
+// --- Browser Notifications ---
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+function sendBrowserNotification(msg) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return; // Only when tab is hidden
+
+    const sender = allUsers.find(u => u.uid === msg.senderId);
+    const senderName = sender ? sender.name : 'Alguien';
+
+    let body = msg.text;
+    if (msg.type === 'image') body = '📷 Imagen';
+    if (msg.type === 'file') body = '📎 Archivo';
+
+    const notification = new Notification(`💬 ${senderName} te ha escrito`, {
+        body: body,
+        icon: `https://ui-avatars.com/api/?name=${encodeURIComponent(senderName)}&background=00a884&color=fff&size=64`,
+        badge: `https://ui-avatars.com/api/?name=SEK&background=00a884&color=fff&size=32`,
+        tag: msg.senderId // Agrupa notificaciones del mismo usuario
+    });
+
+    notification.onclick = () => {
+        window.focus();
+        notification.close();
+        if (sender) openChatWith(sender);
+    };
+
+    // Auto-cerrar a los 5 segundos
+    setTimeout(() => notification.close(), 5000);
 }
 
 loginForm.addEventListener('submit', async (e) => {
@@ -899,7 +1159,12 @@ function renderContacts() {
         let lastText = isGroup ? "Grupo creado" : "Haz clic para chatear", lastTime = "";
         if (chatNotes.length > 0) {
             const last = chatNotes[chatNotes.length - 1];
-            lastText = last.text; lastTime = last.time;
+            lastTime = last.time;
+            if (last.type === 'audio') lastText = '🎤 Audio';
+            else if (last.type === 'image') lastText = '📷 Imagen';
+            else if (last.type === 'file') lastText = '📎 Archivo';
+            else if (last.type === 'call') lastText = '📞 Llamada';
+            else lastText = last.text;
         }
 
         const item = document.createElement('div');
@@ -908,7 +1173,7 @@ function renderContacts() {
 
         const avatar = isGroup ?
             `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
         const normalize = (str) => {
@@ -919,19 +1184,28 @@ function renderContacts() {
         const cleanName = normalize(entity.name);
         const displayPhone = entity.phoneNumber || reservedNumbers[cleanName] || '';
         const phoneDisplay = !isGroup && displayPhone ? `<span class="contact-phone">SEK: ${displayPhone}</span>` : '';
+        const roleClass = `role-${entity.role}`;
+        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
+        const entityDisplayName = isGroup ? entity.name : getDisplayName(entity);
+
+        const unreadCount = getUnreadCount(entity);
+        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
 
         item.innerHTML = `
             ${indicator}
             <img src="${avatar}">
             <div class="contact-info">
                 <div class="contact-name-time">
-                    <span class="contact-name">${entity.name} ${badge} ${phoneDisplay}</span>
+                    <span class="contact-name">${entityDisplayName} ${badge} ${phoneDisplay}</span>
                     <div style="display: flex; align-items: center;">
                         <span class="contact-time">${lastTime}</span>
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
                     </div>
                 </div>
-                <div class="contact-message">${lastText}</div>
+                <div class="contact-message-row">
+                    <div class="contact-message">${lastText}</div>
+                    ${unreadBadge}
+                </div>
             </div>`;
 
         // Handle Pin Toggle
@@ -945,15 +1219,17 @@ function renderContacts() {
             activeChatUser = entity;
             document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
             item.classList.add('active');
-            activeContactName.textContent = entity.name;
+            activeContactName.textContent = isGroup ? entity.name : getDisplayName(entity);
             activeContactImg.src = avatar;
             chatHeaderInfo.classList.add('active');
             chatHeaderText.classList.add('active');
             welcomeMessage.style.display = 'none';
             chatInputArea.style.display = 'flex';
+            document.getElementById('chat-header-actions').style.display = 'flex';
 
             updateHeaderStatus();
             renderMessages();
+            markMessagesAsRead(entity);
 
             // Mobile view toggle
             if (window.innerWidth <= 768) {
@@ -1043,7 +1319,8 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         type: type,
         audioOnly: audioOnly,
         time: time,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        readBy: [auth.currentUser.uid] // Sender has already "read" it
     };
 
     if (activeChatUser.isGroup) {
@@ -1169,6 +1446,52 @@ function sendVoiceRecording() {
 
     mediaRecorder.stop();
     hideRecordingUI();
+}
+
+// --- Unread / Read Logic ---
+
+function markMessagesAsRead(entity) {
+    if (!auth.currentUser || !entity) return;
+    const uid = auth.currentUser.uid;
+
+    const unread = allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid && m.senderId !== uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        return isForMe;
+    });
+
+    if (unread.length === 0) return;
+
+    // Marcar en el Set local INMEDIATAMENTE — nunca se borra aunque Firestore tarde
+    unread.forEach(m => readMessageIds.add(m.id));
+    renderContacts(); // Badge desaparece al instante
+
+    // Persistir en Firestore en segundo plano
+    const batch = db.batch();
+    unread.forEach(m => {
+        batch.update(db.collection("messages").doc(m.id), {
+            readBy: firebase.firestore.FieldValue.arrayUnion(uid)
+        });
+    });
+    batch.commit().catch(e => console.error("Error marking as read:", e));
+}
+
+function getUnreadCount(entity) {
+    if (!auth.currentUser) return 0;
+    const uid = auth.currentUser.uid;
+
+    return allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        if (m.senderId === uid) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        // Considerar leídos los que ya tienen nuestro uid en readBy (de sesiones anteriores)
+        const alreadyRead = m.readBy && m.readBy.includes(uid);
+        return isForMe && !alreadyRead;
+    }).length;
 }
 
 // --- Group Management Logic ---
@@ -1315,10 +1638,10 @@ function openChatWith(entity) {
     const items = document.querySelectorAll('.contact-item');
     items.forEach(el => el.classList.remove('active'));
 
-    activeContactName.textContent = entity.name;
+    activeContactName.textContent = entity.isGroup ? entity.name : getDisplayName(entity);
     const avatar = entity.isGroup ?
         `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=random&color=fff`;
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
     activeContactImg.src = avatar;
 
     chatHeaderInfo.classList.add('active');
@@ -1328,6 +1651,7 @@ function openChatWith(entity) {
 
     updateHeaderStatus();
     renderMessages();
+    markMessagesAsRead(entity);
 
     if (window.innerWidth <= 768) {
         appContainer.classList.add('show-chat');
@@ -1544,5 +1868,33 @@ if (fileInput) {
     });
 }
 
+// --- Alias Logic ---
+const aliasModal = document.getElementById('alias-modal');
+const aliasInput = document.getElementById('alias-input');
+const btnSaveAlias = document.getElementById('btn-save-alias');
+const btnEditAlias = document.getElementById('btn-edit-alias');
+const closeAliasModal = document.getElementById('close-alias-modal');
 
+btnEditAlias.addEventListener('click', () => {
+    aliasInput.value = currentUserData.alias || '';
+    aliasModal.classList.add('active');
+    setTimeout(() => aliasInput.focus(), 100);
+});
 
+closeAliasModal.addEventListener('click', () => aliasModal.classList.remove('active'));
+
+aliasModal.addEventListener('click', (e) => {
+    if (e.target === aliasModal) aliasModal.classList.remove('active');
+});
+
+btnSaveAlias.addEventListener('click', async () => {
+    const alias = aliasInput.value.trim();
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({ alias });
+        currentUserData.alias = alias;
+        showChatScreen(); // Actualiza el nombre en el sidebar
+        aliasModal.classList.remove('active');
+    } catch (e) {
+        alert("Error guardando alias: " + e.message);
+    }
+});

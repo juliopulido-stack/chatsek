@@ -410,7 +410,23 @@ body {
 .user-profile {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.user-profile:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.user-profile:hover .fa-pen {
+    opacity: 1 !important;
+}
+
+.fa-pen {
+    opacity: 0;
+    transition: opacity 0.2s;
 }
 
 .user-profile img {
@@ -561,13 +577,42 @@ body {
     color: var(--text-secondary);
 }
 
+.contact-message-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .contact-message {
     font-size: 14px;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
+    flex: 1;
+    min-width: 0;
+}
+
+.unread-badge {
+    background-color: #25d366;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    flex-shrink: 0;
+    animation: badgePop 0.2s ease;
+}
+
+@keyframes badgePop {
+    from { transform: scale(0.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
 }
 
 /* Main Chat */
@@ -694,13 +739,20 @@ body {
     justify-content: space-between;
     align-items: center;
     background-color: var(--bg-panel);
-    padding: 10px;
+    padding: 10px 14px;
     border-radius: 6px;
+    transition: opacity 0.3s;
 }
 
 .admin-user-item i {
-    color: #ff5252;
     cursor: pointer;
+    font-size: 16px;
+}
+
+.user-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
 }
 
 .chat-header {
@@ -740,7 +792,9 @@ body {
 .chat-header-text .status {
     font-size: 13px;
     color: var(--text-secondary);
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .status.online {
@@ -871,6 +925,120 @@ body {
 
 .chat-input-area i:hover {
     color: var(--text-primary);
+}
+
+/* Botón de micrófono */
+.voice-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    flex-shrink: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.voice-btn i {
+    color: #aebac1;
+    font-size: 22px;
+    pointer-events: none;
+}
+
+.voice-btn:hover {
+    background: rgba(255,255,255,0.08);
+}
+
+.voice-btn:hover i {
+    color: var(--text-primary);
+}
+
+.voice-btn.recording {
+    background: #f43f5e;
+    animation: pulse-red 1s infinite;
+}
+
+.voice-btn.recording i {
+    color: #fff;
+}
+
+@keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244,63,94,0.5); }
+    50%       { box-shadow: 0 0 0 10px rgba(244,63,94,0); }
+}
+
+/* Barra de grabación */
+.recording-bar {
+    height: 62px;
+    background-color: var(--bg-panel);
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.recording-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #f43f5e;
+    animation: blink 1s infinite;
+    flex-shrink: 0;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.2; }
+}
+
+#recording-timer {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f43f5e;
+    min-width: 36px;
+}
+
+.rec-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.rec-btn-cancel { color: #aebac1; font-size: 18px; }
+.rec-btn-cancel:hover { background: rgba(244,63,94,0.15); color: #f43f5e; }
+
+.rec-btn-send { color: var(--primary); font-size: 20px; }
+.rec-btn-send:hover { background: rgba(99,102,241,0.15); }
+
+/* Bubble de mensaje de audio */
+.audio-message {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+}
+
+.audio-icon {
+    color: var(--primary);
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.audio-message audio {
+    border-radius: 20px;
+    outline: none;
+    accent-color: var(--primary);
 }
 
 .input-container {

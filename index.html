@@ -62,10 +62,11 @@
             <!-- Sidebar (Contacts) -->
             <div class="sidebar">
                 <div class="sidebar-header">
-                    <div class="user-profile">
+                    <div class="user-profile" id="btn-edit-alias" title="Cambiar alias" style="cursor:pointer;">
                         <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil"
                             id="my-profile-img">
                         <span id="current-user-name">Usuario</span>
+                        <i class="fas fa-pen" style="font-size:11px; color:var(--text-secondary); margin-left:5px;"></i>
                     </div>
                     <div class="header-actions">
                         <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
@@ -74,6 +75,29 @@
                         <i class="fas fa-th" id="btn-dialpad" title="Abrir Marcador"></i>
                         <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
                         <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
+                    </div>
+                </div>
+
+                <!-- Alias Modal -->
+                <div id="alias-modal" class="modal">
+                    <div class="modal-content" style="max-width:380px;">
+                        <div class="modal-header">
+                            <h2>Tu alias</h2>
+                            <i class="fas fa-times" id="close-alias-modal"></i>
+                        </div>
+                        <div class="modal-body">
+                            <p style="color:var(--text-secondary); margin-bottom:14px; font-size:14px;">
+                                Escribe el alias que verán los demás cuando chatees con ellos. Si lo dejas vacío se
+                                usará tu nombre real.
+                            </p>
+                            <div class="input-group">
+                                <i class="fas fa-user-tag"></i>
+                                <input type="text" id="alias-input" placeholder="Tu alias..." maxlength="30"
+                                    autocomplete="off">
+                            </div>
+                            <button id="btn-save-alias" class="btn-login" style="margin-top:16px; width:100%;">Guardar
+                                alias</button>
+                        </div>
                     </div>
                 </div>
 
@@ -224,8 +248,21 @@
                     <div class="input-container">
                         <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
                     </div>
-                    <i class="fas fa-microphone" id="voice-btn"></i>
+                    <div id="voice-btn" class="voice-btn" title="Clic para grabar, clic para enviar">
+                        <i class="fas fa-microphone"></i>
+                    </div>
                     <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
+                </div>
+
+                <!-- Recording indicator -->
+                <div id="recording-bar" class="recording-bar" style="display:none;">
+                    <span class="recording-dot"></span>
+                    <span id="recording-timer">0:00</span>
+                    <span style="flex:1; color: var(--text-secondary); font-size:13px;">Grabando... (máx. 30s)</span>
+                    <button id="cancel-recording" class="rec-btn rec-btn-cancel" title="Cancelar"><i
+                            class="fas fa-times"></i></button>
+                    <button id="send-recording" class="rec-btn rec-btn-send" title="Enviar audio"><i
+                            class="fas fa-paper-plane"></i></button>
                 </div>
             </div>
 
