@@ -10,11 +10,29 @@ const firebaseConfig = {
 
 // Initialize Firebase using compat SDK
 const app = firebase.initializeApp(firebaseConfig);
-const secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
-const secondaryAuth = secondaryApp.auth();
+
+// V4 FIX: Initialize App Check with reCAPTCHA v3
+const appCheck = firebase.appCheck();
+appCheck.activate(
+    new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+    true // Set to true to allow auto-refresh
+);
 
 const db = firebase.firestore();
 const auth = firebase.auth();
+const storage = firebase.storage();
+
+// ─── Security Helper: XSS Prevention ───────────────────────────────────────
+// Escapes HTML special characters before inserting user content into the DOM.
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
 
 // State
 let currentUserData = null;
@@ -131,21 +149,18 @@ function startRecording() {
                 return;
             }
 
-            // Convertir a base64 y enviar
-            try {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    if (reader.error) {
-                        console.error("FileReader error:", reader.error);
-                        alert("Error al leer el audio grabado.");
-                        return;
-                    }
-                    sendMessage(reader.result, 'audio').catch(err => console.error(err));
-                };
-                reader.readAsDataURL(blob);
-            } catch (err) {
-                console.error("Error procesando audio:", err);
-            }
+            // Subir a Firebase Storage y enviar URL
+            const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
+            const storageRef = storage.ref().child(`chat_audios/${fileName}`);
+            
+            storageRef.put(blob).then(snapshot => {
+                return snapshot.ref.getDownloadURL();
+            }).then(url => {
+                sendMessage(url, 'audio').catch(err => console.error(err));
+            }).catch(err => {
+                console.error("Error subiendo audio:", err);
+                alert("Error al subir la nota de voz.");
+            });
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -381,38 +396,9 @@ auth.onAuthStateChanged(async (user) => {
     }
 });
 
-const reservedNumbers = {
-    "pablopulido": "1029",
-    "pablopulidonilson": "1029",
-    "pablo": "1029",
-    "abuela": "5821",
-    "gema": "7394",
-    "gemamaria": "7394",
-    "alvaropulido": "2948",
-    "alvaro": "2948",
-    "juliopuli": "1109",
-    "julio": "1109",
-    "juliopulido": "1109",
-    "jggimenez": "6473",
-    "fernandopulido": "3847",
-    "fernando": "3847",
-    "titamaribel": "9283",
-    "maribel": "9283"
-};
-
-async function generateUniquePhoneNumber(name = "") {
-    // Thorough normalization: remove spaces, accents, and non-alphanumeric
-    const normalize = (str) => {
-        return str.toLowerCase()
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
-            .replace(/[^a-z0-9]/g, ''); // alphanumeric only
-    };
-
-    const cleanName = normalize(name);
-    if (reservedNumbers[cleanName]) {
-        return reservedNumbers[cleanName];
-    }
-
+// V6 FIX: reservedNumbers removed — personal data must not be hardcoded in public source.
+// Phone numbers are now always generated randomly and stored in Firestore.
+async function generateUniquePhoneNumber() {
     let exists = true;
     let number = "";
     while (exists) {
@@ -436,7 +422,7 @@ async function handleUserLogin(user) {
             role: "usuario",
             status: "online",
             pinnedChats: [],
-            phoneNumber: await generateUniquePhoneNumber(name),
+            phoneNumber: await generateUniquePhoneNumber(),
             lastSeen: firebase.firestore.FieldValue.serverTimestamp()
         };
         await userDocRef.set(currentUserData);
@@ -445,7 +431,7 @@ async function handleUserLogin(user) {
 
         // Assign phone number if missing (migration)
         if (!currentUserData.phoneNumber) {
-            currentUserData.phoneNumber = await generateUniquePhoneNumber(currentUserData.name);
+            currentUserData.phoneNumber = await generateUniquePhoneNumber();
             await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
         }
 
@@ -850,17 +836,11 @@ window.startEditUser = (uid) => {
     document.getElementById('new-user-email').disabled = true;
     document.getElementById('new-user-role').value = user.role;
 
-    if (currentUserData.role === 'super_admin') {
-        passwordContainer.style.display = "block";
-        newUserPassword.required = true;
-        newUserPassword.type = "text";
-        newUserPassword.placeholder = "Contraseña";
-        newUserPassword.value = user.password || "";
-    } else {
-        passwordContainer.style.display = "none";
-        newUserPassword.required = false;
-        newUserPassword.value = "";
-    }
+    // V2 FIX: Never display or load stored passwords.
+    // Passwords are managed exclusively by Firebase Auth.
+    passwordContainer.style.display = "none";
+    newUserPassword.required = false;
+    newUserPassword.value = "";
 };
 
 window.deleteUser = async (uid) => {
@@ -901,44 +881,53 @@ window.resetStrikes = async (uid) => {
 
 adminCreateForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = document.getElementById('new-user-name').value;
-    const email = document.getElementById('new-user-email').value;
+    const name = document.getElementById('new-user-name').value.trim();
+    const email = document.getElementById('new-user-email').value.trim();
     const password = newUserPassword.value;
     const role = document.getElementById('new-user-role').value;
 
     try {
         if (editingUserId) {
-            const updateData = {
-                name: name,
-                role: role
-            };
-            if (currentUserData.role === 'super_admin') {
-                updateData.password = password;
-            }
+            // V2 FIX: Only update name and role — never store or touch passwords.
+            const updateData = { name: name, role: role };
             await db.collection("users").doc(editingUserId).update(updateData);
             alert("Usuario actualizado");
         } else {
-            const cred = await secondaryAuth.createUserWithEmailAndPassword(email, password);
+            // V9 FIX: Use the primary auth instance. Save admin credentials
+            // to restore the session after creating the new user account.
+            const adminEmail = auth.currentUser.email;
+            const adminPasswordInput = prompt(
+                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
+            );
+            if (!adminPasswordInput) return;
+
+            // Create the new user (this signs us out of the admin session)
+            const cred = await auth.createUserWithEmailAndPassword(email, password);
             const newUid = cred.user.uid;
+
+            // V2 FIX: Never store the password in Firestore.
             await db.collection("users").doc(newUid).set({
                 uid: newUid,
                 email: email,
                 name: name,
                 role: role,
-                password: password,
                 status: "offline",
+                phoneNumber: await generateUniquePhoneNumber(),
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
-            await secondaryAuth.signOut();
+
+            // Sign out the newly created user and restore the admin session
+            await auth.signOut();
+            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
             alert("Usuario registrado: " + email);
         }
         resetAdminForm();
-    } catch (e) {
-        console.error("Error completo en Admin Panel:", e);
-        if (e.code === 'auth/too-many-requests') {
+    } catch (err) {
+        console.error("Error completo en Admin Panel:", err);
+        if (err.code === 'auth/too-many-requests') {
             alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
         } else {
-            alert("Error: " + e.message);
+            alert("Error: " + err.message);
         }
     }
 });
@@ -1229,8 +1218,9 @@ function renderContacts(filter = '') {
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
         const roleClass = `role-${entity.role}`;
-        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
-        const entityDisplayName = isGroup ? entity.name : getDisplayName(entity);
+        const entityDisplayName = escapeHtml(isGroup ? entity.name : getDisplayName(entity));
+        const safeRole = escapeHtml(entity.role || '');
+        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${safeRole}</span>` : '';
 
         const unreadCount = getUnreadCount(entity);
         const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
@@ -1328,16 +1318,21 @@ function renderMessages() {
         let senderName = "";
         if (activeChatUser.isGroup && !isMine) {
             const sender = allUsers.find(u => u.uid === msg.senderId);
-            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${sender ? sender.name : 'Unknown'}</div>`;
+            // V3 FIX: escape sender name before inserting into innerHTML
+            const safeName = escapeHtml(sender ? sender.name : 'Unknown');
+            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${safeName}</div>`;
         }
         
         // Render Reply Context
         let replyHtml = '';
         if (msg.replyTo) {
+            // V3 FIX: escape reply author name and text before inserting into innerHTML
+            const safeReplySender = escapeHtml(msg.replyTo.senderName);
+            const safeReplyText = escapeHtml(msg.replyTo.text);
             replyHtml = `
             <div class="reply-preview">
-                <span class="reply-sender">${msg.replyTo.senderName}</span>
-                <div class="reply-text">${msg.replyTo.text}</div>
+                <span class="reply-sender">${safeReplySender}</span>
+                <div class="reply-text">${safeReplyText}</div>
             </div>`;
         }
         
@@ -1350,7 +1345,7 @@ function renderMessages() {
             optionsHtml = `
             <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
             <div class="options-menu" id="options-${msg.id}">
-                <div class="options-menu-item" onclick="startEditingMessage('${msg.id}', \`${msg.text.replace(/`/g, '\\`')}\`)"><i class="fas fa-pen"></i> Editar</div>
+                <div class="options-menu-item" onclick="startEditingMessage('${msg.id}')"><i class="fas fa-pen"></i> Editar</div>
                 <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Eliminar para todos</div>
             </div>
             `;
@@ -1364,7 +1359,8 @@ function renderMessages() {
         }
 
         if (msg.type === 'call') {
-            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${msg.text}<span class="time">${msg.time}</span>`;
+            // 'call' messages use fixed text generated by the app, no user input.
+            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${escapeHtml(msg.text)}<span class="time">${msg.time}</span>`;
             el.style.backgroundColor = 'var(--primary)';
             el.style.cursor = 'pointer';
             el.onclick = () => {
@@ -1372,9 +1368,19 @@ function renderMessages() {
                 startCall(msg.audioOnly || false, true, caller);
             };
         } else if (msg.type === 'audio') {
-            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${msg.text}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
+            // V10 FIX: Use safe URL from Storage and avoid XSS in attributes
+            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
+            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'image') {
+           const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
+           el.innerHTML = `${replyHtml}${senderName}<img src="${escapeHtml(safeImgUrl)}" style="max-width:100%; border-radius:10px; cursor:pointer;" onclick="window.open('${escapeHtml(safeImgUrl)}', '_blank')"><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'file') {
+           const safeFileUrl = msg.text.startsWith('https://') ? msg.text : '';
+           el.innerHTML = `${replyHtml}${senderName}<div class="file-attachment"><i class="fas fa-file-alt"></i> <a href="${escapeHtml(safeFileUrl)}" target="_blank" style="color:white; text-decoration:underline;">Ver archivo adjunto</a></div><span class="time">${msg.time}</span>${optionsHtml}`;
         } else {
-            el.innerHTML = `${replyHtml}${senderName}${msg.text}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
+            // V3 FIX: text messages from users MUST be escaped to prevent XSS.
+            const safeText = escapeHtml(msg.text);
+            el.innerHTML = `${replyHtml}${senderName}${safeText}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
         }
         
         // Touch events for Swipe to Reply
@@ -1495,14 +1501,17 @@ window.deleteMessage = async function(msgId) {
     } catch(e) { console.error("Error eliminando mensaje:", e); }
 };
 
-window.startEditingMessage = function(msgId, text) {
+window.startEditingMessage = function(msgId) {
+    const msg = allMessages.find(m => m.id === msgId);
+    if (!msg) return;
+
     editingMessageId = msgId;
-    messageInput.value = text;
+    messageInput.value = msg.text;
     messageInput.focus();
     // Reutilizamos la caja de reply visual para notificar que estamos editando
     const replyBox = document.getElementById('reply-box-input');
     document.getElementById('reply-sender-name').textContent = "Editando mensaje...";
-    document.getElementById('reply-text-preview').textContent = text;
+    document.getElementById('reply-text-preview').textContent = msg.text;
     replyBox.classList.add('active');
 };
 
@@ -1762,63 +1771,20 @@ directorySearchInput.addEventListener('input', () => {
 function renderDirectory(filter = "") {
     directoryList.innerHTML = "";
 
-    // 1. Get all unique entries from reservedNumbers
-    const reservedEntries = [];
-    const seenNumbers = new Set();
-    const friendlyNames = {
-        "pablopulido": "Pablo Pulido",
-        "pablopulidonilson": "Pablo Pulido Nilson",
-        "pablo": "Pablo",
-        "abuela": "Abuela",
-        "gema": "Gema",
-        "gemamaria": "Gema María",
-        "alvaropulido": "Álvaro Pulido",
-        "alvaro": "Álvaro",
-        "juliopuli": "Julio Puli",
-        "julio": "Julio",
-        "juliopulido": "Julio Pulido",
-        "fernandopulido": "Fernando Pulido",
-        "fernando": "Fernando",
-        "titamaribel": "Tita Maribel",
-        "maribel": "Maribel",
-        "jggimenez": "J.G. Giménez"
-    };
-
-    Object.keys(reservedNumbers).forEach(key => {
-        const num = reservedNumbers[key];
-        if (!seenNumbers.has(num)) {
-            reservedEntries.push({
-                name: friendlyNames[key] || (key.charAt(0).toUpperCase() + key.slice(1)),
-                phoneNumber: num
-            });
-            seenNumbers.add(num);
-        }
-    });
-
-    // 2. Create combined list
-    let displayList = allUsers.map(u => ({
+    // V6 FIX: Directory now shows ONLY users registered in Firestore.
+    // No personal data is hardcoded in the source code.
+    const displayList = allUsers.map(u => ({
         uid: u.uid,
         name: u.name,
         phoneNumber: u.phoneNumber,
         isRegistered: true
     }));
 
-    const registeredNumbersSet = new Set(allUsers.map(u => u.phoneNumber));
-    reservedEntries.forEach(entry => {
-        if (!registeredNumbersSet.has(entry.phoneNumber)) {
-            displayList.push({
-                uid: `off-${entry.phoneNumber}`,
-                name: entry.name,
-                phoneNumber: entry.phoneNumber,
-                isRegistered: false
-            });
-        }
-    });
-
-    // 3. Filter and Sort
+    // Filter and Sort
     const filtered = displayList.filter(u => {
         if (!filter) return true;
-        return u.name.toLowerCase().includes(filter) || u.phoneNumber.includes(filter);
+        return u.name.toLowerCase().includes(filter) ||
+               (u.phoneNumber && u.phoneNumber.includes(filter));
     });
 
     if (filtered.length === 0) {
@@ -1832,38 +1798,39 @@ function renderDirectory(filter = "") {
     filtered.forEach(user => {
         const item = document.createElement('div');
         item.className = "directory-item";
+        // V3 FIX: escape user data before inserting into innerHTML
+        const safeName = escapeHtml(user.name);
+        const safePhone = escapeHtml(user.phoneNumber || '—');
         const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
 
         item.innerHTML = `
             <div class="directory-item-info">
                 <img src="${avatar}">
                 <div class="directory-item-text">
-                    <h4>${user.name} ${user.isRegistered ? '' : '<span style="font-size: 10px; color: #f59e0b; margin-left: 5px;">(Pendiente)</span>'}</h4>
-                    <span>SEK: ${user.phoneNumber}</span>
+                    <h4>${safeName}</h4>
+                    <span>SEK: ${safePhone}</span>
                 </div>
             </div>
             <div style="display: flex; gap: 8px;">
-                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white; ${user.isRegistered ? '' : 'opacity: 0.5; cursor: not-allowed;'}" ${user.isRegistered ? '' : 'disabled'}>
+                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white;">
                     <i class="fas fa-comment"></i>
                 </button>
-                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white; ${user.isRegistered ? '' : 'opacity: 0.5; cursor: not-allowed;'}" ${user.isRegistered ? '' : 'disabled'}>
+                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white;">
                     <i class="fas fa-phone"></i>
                 </button>
             </div>
         `;
 
-        if (user.isRegistered) {
-            item.querySelector('[data-action="chat"]').addEventListener('click', () => {
-                directoryModal.classList.remove('active');
-                openChatWith(user);
-            });
+        item.querySelector('[data-action="chat"]').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            openChatWith(user);
+        });
 
-            item.querySelector('[data-action="call"]').addEventListener('click', () => {
-                directoryModal.classList.remove('active');
-                const fullUser = allUsers.find(u => u.uid === user.uid) || user;
-                startCall(false, false, fullUser);
-            });
-        }
+        item.querySelector('[data-action="call"]').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            const fullUser = allUsers.find(u => u.uid === user.uid) || user;
+            startCall(false, false, fullUser);
+        });
 
         directoryList.appendChild(item);
     });
@@ -1944,13 +1911,17 @@ if (fileInput) {
             return;
         }
 
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const base64 = event.target.result;
-            // Send as individual message
-            await sendMessage(base64, file.type.startsWith('image/') ? 'image' : 'file');
-        };
-        reader.readAsDataURL(file);
+        const fileName = `${Date.now()}_${file.name}`;
+        const storageRef = storage.ref().child(`chat_files/${fileName}`);
+
+        try {
+            const snapshot = await storageRef.put(file);
+            const url = await snapshot.ref.getDownloadURL();
+            await sendMessage(url, file.type.startsWith('image/') ? 'image' : 'file');
+        } catch (err) {
+            console.error("Error subiendo archivo:", err);
+            alert("Error al subir el archivo.");
+        }
     });
 }
 

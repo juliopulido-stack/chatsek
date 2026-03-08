@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función reutilizable para comprobar si está baneado
+    function isNotBanned() {
+      return !('banUntil' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) || 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.banUntil < request.time;
+    }
+
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      
+      // Autorización básica para el usuario final (evitar escalada de privilegios a admin/super_admin)
+      allow update: if request.auth != null && request.auth.uid == userId 
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['role', 'banUntil']);
+      
+      // Prevención en la creación de usuario con rol elevado
+      allow create: if request.auth != null && request.auth.uid == userId
+                    && request.resource.data.role == 'usuario'
+                    && !('banUntil' in request.resource.data);
+    }
+
+    match /groups/{groupId} {
+      allow create: if request.auth != null && isNotBanned();
+      allow read, update: if request.auth != null && (request.auth.uid in resource.data.members);
+      allow delete: if request.auth != null && request.auth.uid == resource.data.createdBy;
+    }
+
+    match /messages/{messageId} {
+      allow read: if request.auth != null && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        (
+          'groupId' in resource.data && 
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members
+        )
+      );
+      
+      allow create: if request.auth != null && isNotBanned() && request.resource.data.senderId == request.auth.uid;
+      
+      allow update: if request.auth != null && (
+         (resource.data.senderId == request.auth.uid && isNotBanned())
+        || (
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
+           )
+      );
+    }
+  }
+}
