@@ -47,6 +47,7 @@ const loginForm = document.getElementById('login-form');
 const emailInput = document.getElementById('email');
 const passwordInput = document.getElementById('password');
 const errorMessage = document.getElementById('error-message');
+const forgotPasswordBtn = document.getElementById('forgot-password');
 
 const myProfileImg = document.getElementById('my-profile-img');
 const currentUserName = document.getElementById('current-user-name');
@@ -1125,6 +1126,26 @@ loginForm.addEventListener('submit', async (e) => {
     }
 });
 
+// --- Password Reset ---
+if (forgotPasswordBtn) {
+    forgotPasswordBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const email = emailInput.value.trim();
+        if (!email) {
+            alert("Por favor, introduce tu correo electrónico en el campo superior para enviarte el enlace de recuperación.");
+            emailInput.focus();
+            return;
+        }
+        
+        try {
+            await auth.sendPasswordResetEmail(email);
+            alert(`Si el correo "${email}" está registrado, recibirás en breve un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
+        } catch (error) {
+            alert("Error al enviar el correo de recuperación: " + error.message);
+        }
+    });
+}
+
 btnLogout.addEventListener('click', async () => {
     await updateUserStatus("offline");
     auth.signOut();
@@ -1132,15 +1153,27 @@ btnLogout.addEventListener('click', async () => {
 
 // --- Render Chat ---
 
-function renderContacts() {
+function renderContacts(filter = '') {
     contactList.innerHTML = '';
 
     // Merge Users and Groups
     let combined = [...allGroups, ...allUsers];
 
-    // Sorting Logic: Pinned first, then by last message time if possible
-    const pinnedIds = currentUserData.pinnedChats || [];
+    // Filter by name (only show if filter is provided, or if they are pinned)
+    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
+    
+    // Only keep those matching filter, OR those that are pinned
+    combined = combined.filter(u => {
+        const isPinned = pinnedIds.includes(u.uid);
+        if (isPinned) return true; // always show pinned
+        
+        if (!filter) return false; // don't show any unpinned contact by default unless searched
+        
+        const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
+        return nameToSearch.toLowerCase().includes(filter);
+    });
 
+    // Sorting Logic: Pinned first, then by last message time if possible
     combined.sort((a, b) => {
         const aPinned = pinnedIds.includes(a.uid);
         const bPinned = pinnedIds.includes(b.uid);
@@ -1181,14 +1214,6 @@ function renderContacts() {
             `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
 
         const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
-        const normalize = (str) => {
-            return str.toLowerCase()
-                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove accents
-                .replace(/[^a-z0-9]/g, ''); // alphanumeric only
-        };
-        const cleanName = normalize(entity.name);
-        const displayPhone = entity.phoneNumber || reservedNumbers[cleanName] || '';
-        const phoneDisplay = !isGroup && displayPhone ? `<span class="contact-phone">SEK: ${displayPhone}</span>` : '';
         const roleClass = `role-${entity.role}`;
         const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${entity.role}</span>` : '';
         const entityDisplayName = isGroup ? entity.name : getDisplayName(entity);
@@ -1201,7 +1226,7 @@ function renderContacts() {
             <img src="${avatar}">
             <div class="contact-info">
                 <div class="contact-name-time">
-                    <span class="contact-name">${entityDisplayName} ${badge} ${phoneDisplay}</span>
+                    <span class="contact-name">${entityDisplayName} ${badge}</span>
                     <div style="display: flex; align-items: center;">
                         <span class="contact-time">${lastTime}</span>
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
