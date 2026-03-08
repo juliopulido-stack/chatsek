@@ -192,30 +192,26 @@ voiceBtn.addEventListener('click', (e) => {
     }
 });
 
-// Botones de grabación — se asignan con onclick para evitar problemas de timing
-function initRecordingButtons() {
-    const btnSend = document.getElementById('send-recording');
-    const btnCancel = document.getElementById('cancel-recording');
+// Botones de grabación — usar listeners permanentes montados sobre el document si no coge bien a la primera
+document.addEventListener('click', (e) => {
+    const btnSend = e.target.closest('#send-recording');
+    const btnCancel = e.target.closest('#cancel-recording');
+    
     if (btnSend) {
-        btnSend.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            isRecording = false;
-            stopRecording(false);
-        };
+        e.preventDefault();
+        e.stopPropagation();
+        isRecording = false;
+        stopRecording(false);
     }
+    
     if (btnCancel) {
-        btnCancel.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            isRecording = false;
-            stopRecording(true);
-        };
+        e.preventDefault();
+        e.stopPropagation();
+        isRecording = false;
+        stopRecording(true);
     }
-}
-// Llamar al inicio y también cuando se muestre el chat
-document.addEventListener('DOMContentLoaded', initRecordingButtons);
-setTimeout(initRecordingButtons, 1000);
+});
+
 
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
@@ -1130,16 +1126,17 @@ loginForm.addEventListener('submit', async (e) => {
 if (forgotPasswordBtn) {
     forgotPasswordBtn.addEventListener('click', async (e) => {
         e.preventDefault();
-        const email = emailInput.value.trim();
-        if (!email) {
-            alert("Por favor, introduce tu correo electrónico en el campo superior para enviarte el enlace de recuperación.");
-            emailInput.focus();
-            return;
+        
+        let initialEmail = emailInput.value.trim();
+        const email = prompt("Introduce tu correo electrónico para restablecer tu contraseña:", initialEmail);
+        
+        if (!email || !email.trim()) {
+            return; // Cancelado por el usuario o vacío
         }
         
         try {
-            await auth.sendPasswordResetEmail(email);
-            alert(`Si el correo "${email}" está registrado, recibirás en breve un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
+            await auth.sendPasswordResetEmail(email.trim());
+            alert(`Si el correo "${email.trim()}" está registrado, recibirás en breve un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
         } catch (error) {
             alert("Error al enviar el correo de recuperación: " + error.message);
         }
