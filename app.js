@@ -22,6 +22,16 @@ let activeChatUser = null;
 let allMessages = [];
 let allUsers = [];
 let allGroups = [];
+let myStream = null;
+let currentCallId = null;
+let isAudioOnlyCall = false;
+let isCaller = false;
+let webrtcInitTimeout = null;
+let audioContext = null;
+
+// New message mechanics
+let editingMessageId = null;
+let replyingToMessage = null;
 let isUserBanned = false; // New global ban state
 let unsubscribeMessages = null;
 let unsubscribeUsers = null;
@@ -1304,12 +1314,53 @@ function renderMessages() {
 
     messagesToShow.forEach(msg => {
         const el = document.createElement('div');
-        el.className = `message ${msg.senderId === auth.currentUser.uid ? 'sent' : 'received'}`;
+        const isMine = msg.senderId === auth.currentUser.uid;
+        el.className = `message ${isMine ? 'sent' : 'received'}`;
+        el.dataset.id = msg.id;
+
+        // Is message deleted?
+        if (msg.isDeleted) {
+            el.innerHTML = `<span class="deleted-msg"><i class="fas fa-ban"></i> Este mensaje fue eliminado</span>`;
+            chatMessages.appendChild(el);
+            return; // Skip normal rendering
+        }
 
         let senderName = "";
-        if (activeChatUser.isGroup && msg.senderId !== auth.currentUser.uid) {
+        if (activeChatUser.isGroup && !isMine) {
             const sender = allUsers.find(u => u.uid === msg.senderId);
             senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${sender ? sender.name : 'Unknown'}</div>`;
+        }
+        
+        // Render Reply Context
+        let replyHtml = '';
+        if (msg.replyTo) {
+            replyHtml = `
+            <div class="reply-preview">
+                <span class="reply-sender">${msg.replyTo.senderName}</span>
+                <div class="reply-text">${msg.replyTo.text}</div>
+            </div>`;
+        }
+        
+        // Render Edited Tag
+        const editedHtml = msg.isEdited ? `<span class="edited-tag">(editado)</span>` : '';
+
+        // Options Menu (Only for my messages)
+        let optionsHtml = '';
+        if (isMine && msg.type === 'text') {
+            optionsHtml = `
+            <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+            <div class="options-menu" id="options-${msg.id}">
+                <div class="options-menu-item" onclick="startEditingMessage('${msg.id}', \`${msg.text.replace(/`/g, '\\`')}\`)"><i class="fas fa-pen"></i> Editar</div>
+                <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Eliminar para todos</div>
+            </div>
+            `;
+        } else if (isMine) { // non-text but mine
+             optionsHtml = `
+            <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+            <div class="options-menu" id="options-${msg.id}">
+                <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Eliminar para todos</div>
+            </div>
+            `;
         }
 
         if (msg.type === 'call') {
@@ -1321,10 +1372,35 @@ function renderMessages() {
                 startCall(msg.audioOnly || false, true, caller);
             };
         } else if (msg.type === 'audio') {
-            el.innerHTML = `${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${msg.text}"></audio></div><span class="time">${msg.time}</span>`;
+            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${msg.text}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
         } else {
-            el.innerHTML = `${senderName}${msg.text}<span class="time">${msg.time}</span>`;
+            el.innerHTML = `${replyHtml}${senderName}${msg.text}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
         }
+        
+        // Touch events for Swipe to Reply
+        let touchStartX = 0;
+        let touchEndX = 0;
+        
+        el.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, {passive: true});
+        
+        el.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipeReply();
+        }, {passive: true});
+        
+        function handleSwipeReply() {
+            // Swipe right (> 40px)
+            if (touchEndX - touchStartX > 40) {
+                const userSource = isMine ? 'Tú' : (activeChatUser.isGroup ? (allUsers.find(u => u.uid === msg.senderId)?.name || 'Unknown') : activeChatUser.name);
+                let txt = msg.text;
+                if (msg.type === 'audio') txt = '🎵 Nota de voz';
+                else if (msg.type === 'call') txt = '📞 Llamada';
+                prepareReply(msg.id, userSource, txt);
+            }
+        }
+
         chatMessages.appendChild(el);
     });
     setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
@@ -1343,10 +1419,27 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         return; // Stop message from being sent
     }
 
-    const now = new Date();
-    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     if (!overrideText) messageInput.value = '';
 
+    // Si estamos editando un mensaje existente y es de tipo texto
+    if (editingMessageId && type === 'text') {
+        try {
+            await db.collection("messages").doc(editingMessageId).update({
+                text: text,
+                isEdited: true
+            });
+            editingMessageId = null; // Reset
+            cancelReplyMode(); // Limpiar UI por si acaso
+        } catch (e) {
+            console.error("Error al editar mensaje:", e);
+        }
+        return;
+    }
+
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    // Preparar el mensaje nuevo
     const messageData = {
         senderId: auth.currentUser.uid,
         text: text,
@@ -1356,6 +1449,12 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         timestamp: firebase.firestore.FieldValue.serverTimestamp(),
         readBy: [auth.currentUser.uid] // Sender has already "read" it
     };
+
+    // Agregar contexto de respuesta si existe
+    if (replyingToMessage) {
+        messageData.replyTo = replyingToMessage;
+        cancelReplyMode(); // Reset visual state
+    }
 
     if (activeChatUser.isGroup) {
         messageData.groupId = activeChatUser.uid;
@@ -1369,6 +1468,68 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         console.error("Error al enviar mensaje:", e);
         alert("Hubo un error al enviar el mensaje. Revisa tu conexión.");
     }
+}
+
+// Global click to close options menu
+document.addEventListener('click', () => {
+    document.querySelectorAll('.options-menu').forEach(m => m.classList.remove('active'));
+});
+
+// UI helpers para responder/editar/borrar
+window.toggleMessageOptions = function(msgId, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.options-menu').forEach(m => {
+        if (m.id !== `options-${msgId}`) m.classList.remove('active');
+    });
+    const menu = document.getElementById(`options-${msgId}`);
+    if (menu) menu.classList.toggle('active');
+};
+
+window.deleteMessage = async function(msgId) {
+    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
+    try {
+        await db.collection("messages").doc(msgId).update({
+            isDeleted: true,
+            text: ""
+        });
+    } catch(e) { console.error("Error eliminando mensaje:", e); }
+};
+
+window.startEditingMessage = function(msgId, text) {
+    editingMessageId = msgId;
+    messageInput.value = text;
+    messageInput.focus();
+    // Reutilizamos la caja de reply visual para notificar que estamos editando
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = "Editando mensaje...";
+    document.getElementById('reply-text-preview').textContent = text;
+    replyBox.classList.add('active');
+};
+
+function prepareReply(msgId, senderName, text) {
+    editingMessageId = null; // Can't edit and reply at the same time
+    replyingToMessage = { id: msgId, senderName, text };
+    
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = `Responder a ${senderName}`;
+    document.getElementById('reply-text-preview').textContent = text;
+    replyBox.classList.add('active');
+    messageInput.focus();
+}
+
+const btnCloseReply = document.getElementById('btn-close-reply');
+if(btnCloseReply) {
+    btnCloseReply.addEventListener('click', cancelReplyMode);
+}
+
+function cancelReplyMode() {
+    replyingToMessage = null;
+    if(editingMessageId) {
+        editingMessageId = null;
+        messageInput.value = '';
+    }
+    const replyBox = document.getElementById('reply-box-input');
+    if (replyBox) replyBox.classList.remove('active');
 }
 
 // Voice recording logic has been migrated to the top of the file

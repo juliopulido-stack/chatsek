@@ -115,7 +115,7 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 3.2.1</div>
+                    <div class="app-version-sidebar">Version 3.2.2</div>
                 </div>
             </div>
 
@@ -244,7 +244,16 @@
                 </div>
 
                 <!-- Chat Input -->
-                <div class="chat-input-area" id="chat-input-area" style="display: none;">
+                <div class="chat-input-area" id="chat-input-area" style="display: none; position: relative;">
+                    <!-- Caja de previsualización de cita / respuesta oculta por defecto -->
+                    <div id="reply-box-input" class="reply-box-input">
+                        <div class="reply-box-content">
+                            <span id="reply-sender-name" class="reply-sender"></span>
+                            <div id="reply-text-preview" class="reply-text"></div>
+                        </div>
+                        <i class="fas fa-times close-reply" id="btn-close-reply" title="Cancelar respuesta"></i>
+                    </div>
+
                     <i class="far fa-smile" id="emoji-btn"></i>
                     <i class="fas fa-paperclip" id="attach-btn"></i>
                     <input type="file" id="file-input" style="display: none;">

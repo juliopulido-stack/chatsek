@@ -906,6 +906,137 @@ body {
     border-right: 8px solid transparent;
 }
 
+/* Opciones de mensaje y edición */
+.message-options-btn {
+    position: absolute;
+    top: 2px;
+    right: 5px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+    padding: 2px;
+}
+
+.message:hover .message-options-btn {
+    opacity: 1;
+}
+
+.options-menu {
+    position: absolute;
+    top: 20px;
+    right: 5px;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: none;
+    flex-direction: column;
+    z-index: 10;
+    min-width: 120px;
+    overflow: hidden;
+}
+
+.options-menu.active {
+    display: flex;
+}
+
+.options-menu-item {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.options-menu-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.options-menu-item.danger {
+    color: #f43f5e;
+}
+
+.edited-tag {
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+    font-style: italic;
+    margin-left: 5px;
+}
+
+.deleted-msg {
+    font-style: italic;
+    color: rgba(255,255,255,0.6);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.reply-preview {
+    background-color: rgba(0,0,0,0.2);
+    border-left: 4px solid var(--primary);
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    font-size: 13px;
+}
+
+.reply-preview .reply-sender {
+    color: var(--primary);
+    font-weight: 600;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.reply-preview .reply-text {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reply-box-input {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    width: 100%;
+    background-color: var(--bg-panel);
+    padding: 10px 16px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--border-color);
+    z-index: 0;
+}
+
+.reply-box-input.active {
+    display: flex;
+}
+
+.reply-box-content {
+    background-color: var(--bg-color);
+    border-left: 4px solid var(--primary);
+    padding: 8px 12px;
+    border-radius: 4px;
+    flex: 1;
+    margin-right: 15px;
+}
+
+.close-reply {
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 5px;
+}
+
+.close-reply:hover {
+    color: var(--text-primary);
+}
+
 .chat-input-area {
     height: 62px;
     background-color: var(--bg-panel);
