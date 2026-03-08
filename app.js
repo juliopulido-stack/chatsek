@@ -121,11 +121,20 @@ function startRecording() {
             }
 
             // Convertir a base64 y enviar
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                sendMessage(reader.result, 'audio');
-            };
-            reader.readAsDataURL(blob);
+            try {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    if (reader.error) {
+                        console.error("FileReader error:", reader.error);
+                        alert("Error al leer el audio grabado.");
+                        return;
+                    }
+                    sendMessage(reader.result, 'audio').catch(err => console.error(err));
+                };
+                reader.readAsDataURL(blob);
+            } catch (err) {
+                console.error("Error procesando audio:", err);
+            }
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -165,6 +174,7 @@ function stopRecordingUI() {
     recordingBar.style.display = 'none';
     chatInputArea.style.display = 'flex';
     voiceBtn.classList.remove('recording');
+    isRecording = false;
 }
 
 // Clic en micro: empezar o parar grabación (sin enviar)
@@ -1298,8 +1308,8 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
     const text = overrideText || messageInput.value.trim();
     if (!text || !activeChatUser) return;
 
-    // Profanity Check
-    if (hasProfanity(text)) {
+    // Profanity Check (sólo para texto)
+    if (type === 'text' && hasProfanity(text)) {
         applyStrike();
         return; // Stop message from being sent
     }
@@ -1326,7 +1336,10 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
 
     try {
         await db.collection("messages").add(messageData);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error("Error al enviar mensaje:", e);
+        alert("Hubo un error al enviar el mensaje. Revisa tu conexión.");
+    }
 }
 
 // Voice recording logic has been migrated to the top of the file
