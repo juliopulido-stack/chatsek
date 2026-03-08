@@ -1137,8 +1137,15 @@ if (forgotPasswordBtn) {
         try {
             await auth.sendPasswordResetEmail(email.trim());
             alert(`Si el correo "${email.trim()}" está registrado, recibirás en breve un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
-        } catch (error) {
-            alert("Error al enviar el correo de recuperación: " + error.message);
+        } catch (e) {
+            console.error("Error al enviar correo de recuperación:", e);
+            if (e.code === 'auth/user-not-found') {
+               alert("Este correo no está registrado en el sistema.");
+            } else if (e.code === 'auth/invalid-email') {
+               alert("El formato del correo introducido no es válido.");
+            } else {
+               alert("Error al enviar el correo de recuperación: " + e.message);
+            }
         }
     });
 }
