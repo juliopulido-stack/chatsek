@@ -8,18 +8,31 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.banUntil < request.time;
     }
 
+    function isAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'];
+    }
+
+    function isSuperAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null;
       
-      // Autorización básica para el usuario final (evitar escalada de privilegios a admin/super_admin)
-      allow update: if request.auth != null && request.auth.uid == userId 
-                    && !request.resource.data.diff(resource.data).affectedKeys()
-                        .hasAny(['role', 'banUntil']);
+      // El usuario puede editar su propio perfil (limitado), o un admin puede editar a otros
+      allow update: if request.auth != null && (
+                      (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'banUntil']))
+                      || isAdmin()
+                    );
       
-      // Prevención en la creación de usuario con rol elevado
-      allow create: if request.auth != null && request.auth.uid == userId
-                    && request.resource.data.role == 'usuario'
-                    && !('banUntil' in request.resource.data);
+      // Un admin puede crear usuarios, o un usuario puede registrarse como 'usuario'
+      allow create: if request.auth != null && (
+                      (request.auth.uid == userId && request.resource.data.role == 'usuario' && !('banUntil' in request.resource.data))
+                      || isAdmin()
+                    );
+      
+      // Permitir borrar usuarios solo a super_admin
+      allow delete: if request.auth != null && isSuperAdmin();
     }
 
     match /groups/{groupId} {
