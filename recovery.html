@@ -107,10 +107,11 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-appcheck-compat.js"></script>
+    <!-- Note: Correct URL for App Check compat usually has hyphens -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check-compat.js"></script>
 
     <script>
-        // Extraemos la config de app.js (se asume que está en la misma carpeta)
+        // Extraemos la config de app.js
         const firebaseConfig = {
             apiKey: "AIzaSyChRpWOi8UON6LvU3ERmSNQ04IwtRUoZDc",
             authDomain: "chatprivado-33d21.firebaseapp.com",
@@ -123,11 +124,22 @@
         const app = firebase.initializeApp(firebaseConfig);
         
         // V4 FIX: Initialize App Check with reCAPTCHA v3
-        const appCheck = firebase.appCheck();
-        appCheck.activate(
-            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
-            true
-        );
+        let appCheck;
+        try {
+            if (typeof firebase.appCheck === 'function') {
+                appCheck = firebase.appCheck();
+                appCheck.activate(
+                    new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+                    true
+                );
+                console.log("App Check inicializado correctamente.");
+            } else {
+                console.error("firebase.appCheck no es una función. La librería no se ha cargado correctamente.");
+                alert("Error crítico: La librería de Firebase App Check no se ha cargado. Revisa la consola.");
+            }
+        } catch (e) {
+            console.error("Error inicializando App Check:", e);
+        }
 
         const auth = firebase.auth();
         const db = firebase.firestore();
