@@ -107,6 +107,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-appcheck-compat.js"></script>
 
     <script>
         // Extraemos la config de app.js (se asume que está en la misma carpeta)
@@ -119,7 +120,15 @@
             appId: "1:823294283727:web:f3df8f62461ed1d0004cba"
         };
 
-        firebase.initializeApp(firebaseConfig);
+        const app = firebase.initializeApp(firebaseConfig);
+        
+        // V4 FIX: Initialize App Check with reCAPTCHA v3
+        const appCheck = firebase.appCheck();
+        appCheck.activate(
+            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+            true
+        );
+
         const auth = firebase.auth();
         const db = firebase.firestore();
 
