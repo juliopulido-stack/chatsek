@@ -12,11 +12,19 @@ const firebaseConfig = {
 const app = firebase.initializeApp(firebaseConfig);
 
 // V4 FIX: Initialize App Check with reCAPTCHA v3
-const appCheck = firebase.appCheck();
-appCheck.activate(
-    new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
-    true // Set to true to allow auto-refresh
-);
+try {
+    if (typeof firebase.appCheck === 'function') {
+        const appCheck = firebase.appCheck();
+        appCheck.activate(
+            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+            true // Set to true to allow auto-refresh
+        );
+    } else {
+        console.error("Firebase App Check not available.");
+    }
+} catch (e) {
+    console.error("App Check initialization error:", e);
+}
 
 const db = firebase.firestore();
 const auth = firebase.auth();
