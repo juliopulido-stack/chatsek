@@ -1,58 +1,86 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Función reutilizable para comprobar si está baneado
+
+    // ─── Funciones Helper ───────────────────────────────────────────────────────
+
+    function getMyData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // MEJORA 1: isNotBanned maneja "permanent" (string), null y Timestamps
     function isNotBanned() {
-      return !('banUntil' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) || 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.banUntil < request.time;
+      let data = getMyData();
+      return !('banUntil' in data) ||
+             data.banUntil == null ||
+             (data.banUntil is timestamp && data.banUntil < request.time);
     }
 
     function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'];
+      return getMyData().role in ['admin', 'super_admin'];
     }
 
     function isSuperAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
+      return getMyData().role == 'super_admin';
     }
+
+    // ─── Usuarios ────────────────────────────────────────────────────────────────
 
     match /users/{userId} {
       allow read: if request.auth != null;
-      
-      // El usuario puede editar su propio perfil (limitado), o un admin puede editar a otros
+
+      // MEJORA 1: Solo super_admin puede cambiar el campo "role".
+      // Un admin puede activar/desactivar/editar pero NO ascenderse a sí mismo.
+      // Un usuario solo puede editar su propio perfil sin tocar role/banUntil/disabled.
       allow update: if request.auth != null && (
-                      (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'banUntil']))
-                      || isAdmin()
+                      (
+                        request.auth.uid == userId &&
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'banUntil', 'disabled'])
+                      )
+                      || (isAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+                      || isSuperAdmin()
                     );
-      
+
       // Un admin puede crear usuarios, o un usuario puede registrarse como 'usuario'
       allow create: if request.auth != null && (
                       (request.auth.uid == userId && request.resource.data.role == 'usuario' && !('banUntil' in request.resource.data))
                       || isAdmin()
                     );
-      
-      // Permitir borrar usuarios solo a super_admin
+
+      // Solo super_admin puede borrar usuarios
       allow delete: if request.auth != null && isSuperAdmin();
     }
 
+    // ─── Grupos ──────────────────────────────────────────────────────────────────
+
+    // MEJORA 4: Reforzado — super_admin puede borrar cualquier grupo; solo miembros leen/actualizan
     match /groups/{groupId} {
-      allow create: if request.auth != null && isNotBanned();
-      allow read, update: if request.auth != null && (request.auth.uid in resource.data.members);
-      allow delete: if request.auth != null && request.auth.uid == resource.data.createdBy;
+      allow read: if request.auth != null && (request.auth.uid in resource.data.members);
+      allow create: if request.auth != null && isNotBanned() && request.auth.uid in request.resource.data.members;
+      allow update: if request.auth != null && (request.auth.uid in resource.data.members);
+      allow delete: if request.auth != null && (
+                      request.auth.uid == resource.data.createdBy || isSuperAdmin()
+                    );
     }
+
+    // ─── Mensajes ────────────────────────────────────────────────────────────────
 
     match /messages/{messageId} {
       allow read: if request.auth != null && (
         resource.data.senderId == request.auth.uid ||
         resource.data.receiverId == request.auth.uid ||
         (
-          'groupId' in resource.data && 
+          'groupId' in resource.data &&
           request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members
         )
       );
-      
-      allow create: if request.auth != null && isNotBanned() && request.resource.data.senderId == request.auth.uid;
-      
+
+      // MEJORA 2: Límite de 5000 caracteres por mensaje para evitar abuso de almacenamiento
+      allow create: if request.auth != null
+                    && isNotBanned()
+                    && request.resource.data.senderId == request.auth.uid
+                    && ('content' in request.resource.data ? request.resource.data.content.size() < 5000 : true);
+
       allow update: if request.auth != null && (
          (resource.data.senderId == request.auth.uid && isNotBanned())
         || (
@@ -60,5 +88,16 @@ service cloud.firestore {
            )
       );
     }
+
+    // ─── Logs de Auditoría ───────────────────────────────────────────────────────
+
+    // MEJORA 5: Solo super_admin puede leer; cualquier usuario autenticado puede crear;
+    // nadie puede modificar ni borrar (inmutables por diseño)
+    match /logs/{logId} {
+      allow read: if request.auth != null && isSuperAdmin();
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
   }
 }
