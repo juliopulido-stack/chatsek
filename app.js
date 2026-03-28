@@ -1184,7 +1184,26 @@ function renderContacts(filter = '') {
         return nameToSearch.toLowerCase().includes(filter);
     });
 
-    // Sorting Logic: Pinned first, then by last message time if possible
+    // Helper to get the latest message timestamp for an entity
+    const getLatestTimestamp = (entity) => {
+        if (!auth.currentUser) return 0;
+        const isGroup = entity.isGroup;
+        const chatNotes = allMessages.filter(m =>
+            isGroup ? (m.groupId === entity.uid) :
+                ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) ||
+                 (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
+        );
+        if (chatNotes.length > 0) {
+            const last = chatNotes[chatNotes.length - 1];
+            if (last.timestamp) {
+                return typeof last.timestamp.toMillis === 'function' ? last.timestamp.toMillis() : Date.now();
+            }
+            return Date.now(); // optimistic local message
+        }
+        return 0;
+    };
+
+    // Sorting Logic: Pinned first, then by last message time
     combined.sort((a, b) => {
         const aPinned = pinnedIds.includes(a.uid);
         const bPinned = pinnedIds.includes(b.uid);
@@ -1192,8 +1211,8 @@ function renderContacts(filter = '') {
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
 
-        // If both pinned or both unpinned, we could sort by last message time here in the future
-        return 0;
+        // If both pinned or both unpinned, sort by newest message (descending)
+        return getLatestTimestamp(b) - getLatestTimestamp(a);
     });
 
     combined.forEach(entity => {
