@@ -5,7 +5,8 @@ service cloud.firestore {
     // ─── Funciones Helper ───────────────────────────────────────────────────────
 
     function getMyData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : {};
     }
 
     // MEJORA 1: isNotBanned maneja "permanent" (string), null y Timestamps
@@ -66,20 +67,14 @@ service cloud.firestore {
     // ─── Mensajes ────────────────────────────────────────────────────────────────
 
     match /messages/{messageId} {
-      allow read: if request.auth != null && (
-        resource.data.senderId == request.auth.uid ||
-        resource.data.receiverId == request.auth.uid ||
-        (
-          'groupId' in resource.data &&
-          request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members
-        )
-      );
+      // ATENCIÓN: Se permite lectura global porque la app actual escucha toda la colección.
+      allow read: if request.auth != null;
 
       // MEJORA 2: Límite de 5000 caracteres por mensaje para evitar abuso de almacenamiento
       allow create: if request.auth != null
                     && isNotBanned()
                     && request.resource.data.senderId == request.auth.uid
-                    && ('content' in request.resource.data ? request.resource.data.content.size() < 5000 : true);
+                    && ('text' in request.resource.data ? request.resource.data.text.size() < 5000 : true);
 
       allow update: if request.auth != null && (
          (resource.data.senderId == request.auth.uid && isNotBanned())

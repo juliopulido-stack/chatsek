@@ -1441,6 +1441,15 @@ function renderMessages() {
 
 sendBtn.addEventListener('click', () => sendMessage());
 messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+messageInput.addEventListener('input', () => {
+    if (messageInput.value.trim().length > 0) {
+        sendBtn.style.display = 'block';
+        voiceBtn.style.display = 'none';
+    } else {
+        sendBtn.style.display = 'none';
+        voiceBtn.style.display = 'flex';
+    }
+});
 
 async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
     const text = overrideText || messageInput.value.trim();
@@ -1452,7 +1461,10 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         return; // Stop message from being sent
     }
 
-    if (!overrideText) messageInput.value = '';
+    if (!overrideText) {
+        messageInput.value = '';
+        messageInput.dispatchEvent(new Event('input'));
+    }
 
     // Si estamos editando un mensaje existente y es de tipo texto
     if (editingMessageId && type === 'text') {
@@ -1979,6 +1991,3 @@ btnSaveAlias.addEventListener('click', async () => {
         showChatScreen(); // Actualiza el nombre en el sidebar
         aliasModal.classList.remove('active');
     } catch (e) {
-        alert("Error guardando alias: " + e.message);
-    }
-});

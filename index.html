@@ -17,6 +17,8 @@
             https://www.gstatic.com
             https://meet.jit.si
             https://8x8.vc
+            https://www.google.com
+            https://www.gstatic.com/cpjs/
             https://www.google.com/recaptcha/
             https://www.gstatic.com/recaptcha/;
         style-src 'self' 'unsafe-inline'
@@ -30,11 +32,15 @@
             https://www.gstatic.com;
         connect-src 'self'
             https://*.googleapis.com
+            https://firestore.googleapis.com
             https://*.firebaseio.com
             wss://*.firebaseio.com
             https://identitytoolkit.googleapis.com
             https://securetoken.googleapis.com
-            https://*.cloudfunctions.net;
+            https://*.cloudfunctions.net
+            https://*.firebasestorage.app
+            https://firebaseinstallations.googleapis.com
+            https://firebaselogging-pa.googleapis.com;
         media-src 'self' blob: data:;
         frame-src https://meet.jit.si https://8x8.vc https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/;
         object-src 'none';
@@ -151,7 +157,7 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 3.2.4</div>
+                    <div class="app-version-sidebar">Version 3.2.5</div>
                 </div>
             </div>
 

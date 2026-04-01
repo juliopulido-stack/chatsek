@@ -1,0 +1,8 @@
+# Reglas para el Asistente (AI Rules)
+
+1. **Control de Versiones estricto**:
+   - Después de CADA modificación en el código o funcionalidad, DEBES incrementar la versión del proyecto (ej. de `3.2.4` a `3.2.5`).
+   - Revisa y actualiza siempre el número de versión visible para el usuario, que generalmente se encuentra en `index.html` (busca `app-version-sidebar`).
+
+2. **Verificación post-cambios**:
+   - Después de realizar cualquier cambio, DEBES comprobar proactivamente que todo funciona de manera correcta y que la nueva funcionalidad cumple con lo esperado sin romper el código anterior.
