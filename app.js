@@ -203,6 +203,9 @@ function startRecordingUI() {
     }, 1000);
 }
 
+// Declared before stopRecordingUI to avoid temporal dead zone with let
+let isRecording = false;
+
 function stopRecordingUI() {
     clearInterval(recordingTimerInterval);
     recordingBar.style.display = 'none';
@@ -212,7 +215,6 @@ function stopRecordingUI() {
 }
 
 // Clic en micro: empezar o parar grabación (sin enviar)
-let isRecording = false;
 voiceBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -722,8 +724,9 @@ function handleIncomingCall(msg) {
     const caller = allUsers.find(u => u.uid === msg.senderId);
     if (!caller) return;
 
-    callerName.textContent = caller.name;
-    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(caller.name)}&background=random&color=fff&size=200`;
+    const callerDisplayName = getDisplayName(caller);
+    callerName.textContent = callerDisplayName;
+    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(callerDisplayName)}&background=random&color=fff&size=200`;
     callTypeText.textContent = msg.audioOnly ? "Llamada de voz entrante..." : "Videollamada entrante...";
 
     incomingCallOverlay.classList.add('active');
@@ -852,10 +855,25 @@ window.startEditUser = (uid) => {
 };
 
 window.deleteUser = async (uid) => {
-    if (!confirm("¿Seguro que quieres borrar este usuario?")) return;
+    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
     try {
+        // 1. Delete Firestore document
         await db.collection("users").doc(uid).delete();
-        alert("Usuario eliminado.");
+
+        // 2. Attempt to delete from Firebase Auth via Cloud Function
+        // Requires a deployed Cloud Function named 'deleteAuthUser'
+        try {
+            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
+            if (deleteAuthUser) {
+                await deleteAuthUser({ uid });
+            } else {
+                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
+            }
+        } catch (fnErr) {
+            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
+        }
+
+        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
     } catch (e) {
         alert("Error: " + e.message);
     }
@@ -1096,7 +1114,7 @@ function sendBrowserNotification(msg) {
     if (document.visibilityState === 'visible') return; // Only when tab is hidden
 
     const sender = allUsers.find(u => u.uid === msg.senderId);
-    const senderName = sender ? sender.name : 'Alguien';
+    const senderName = sender ? getDisplayName(sender) : 'Alguien';
 
     let body = msg.text;
     if (msg.type === 'image') body = '📷 Imagen';
@@ -1133,28 +1151,51 @@ loginForm.addEventListener('submit', async (e) => {
 if (forgotPasswordBtn) {
     forgotPasswordBtn.addEventListener('click', async (e) => {
         e.preventDefault();
-        
-        let initialEmail = emailInput.value.trim();
-        const email = prompt("Introduce tu correo electrónico para restablecer tu contraseña:", initialEmail);
-        
-        if (!email || !email.trim()) {
-            return; // Cancelado por el usuario o vacío
+
+        // Use the email already typed in the login form, or ask inline
+        let email = emailInput.value.trim();
+        if (!email) {
+            // Show a simple inline input below the forgot-password link instead of prompt()
+            const existingBox = document.getElementById('reset-email-box');
+            if (existingBox) { existingBox.remove(); return; }
+
+            const box = document.createElement('div');
+            box.id = 'reset-email-box';
+            box.style.cssText = 'margin-top:10px; display:flex; gap:8px; align-items:center;';
+            box.innerHTML = `
+                <input type="email" id="reset-email-input" placeholder="Tu correo electrónico"
+                    style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-primary); font-size:14px;">
+                <button id="reset-email-send" class="btn-login" style="padding:8px 14px; font-size:13px;">Enviar</button>
+            `;
+            forgotPasswordBtn.parentElement.appendChild(box);
+            document.getElementById('reset-email-input').focus();
+
+            document.getElementById('reset-email-send').addEventListener('click', async () => {
+                const val = document.getElementById('reset-email-input').value.trim();
+                if (!val) return;
+                box.remove();
+                await sendPasswordReset(val);
+            });
+            return;
         }
-        
-        try {
-            await auth.sendPasswordResetEmail(email.trim());
-            alert(`Si el correo "${email.trim()}" está registrado, recibirás en breve un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
-        } catch (e) {
-            console.error("Error al enviar correo de recuperación:", e);
-            if (e.code === 'auth/user-not-found') {
-               alert("Este correo no está registrado en el sistema.");
-            } else if (e.code === 'auth/invalid-email') {
-               alert("El formato del correo introducido no es válido.");
-            } else {
-               alert("Error al enviar el correo de recuperación: " + e.message);
-            }
-        }
+        await sendPasswordReset(email);
     });
+}
+
+async function sendPasswordReset(email) {
+    try {
+        await auth.sendPasswordResetEmail(email);
+        alert(`Si el correo "${email}" está registrado, recibirás un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
+    } catch (e) {
+        console.error("Error al enviar correo de recuperación:", e);
+        if (e.code === 'auth/user-not-found') {
+            alert("Este correo no está registrado en el sistema.");
+        } else if (e.code === 'auth/invalid-email') {
+            alert("El formato del correo introducido no es válido.");
+        } else {
+            alert("Error al enviar el correo de recuperación: " + e.message);
+        }
+    }
 }
 
 btnLogout.addEventListener('click', async () => {
@@ -1232,7 +1273,7 @@ function renderContacts(filter = '') {
             else if (last.type === 'image') lastText = '📷 Imagen';
             else if (last.type === 'file') lastText = '📎 Archivo';
             else if (last.type === 'call') lastText = '📞 Llamada';
-            else lastText = last.text;
+            else lastText = escapeHtml(last.text); // XSS fix: escape user-generated text
         }
 
         const item = document.createElement('div');
