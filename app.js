@@ -2032,3 +2032,7 @@ btnSaveAlias.addEventListener('click', async () => {
         showChatScreen(); // Actualiza el nombre en el sidebar
         aliasModal.classList.remove('active');
     } catch (e) {
+        console.error("Error guardando alias:", e);
+        alert("Error al guardar el alias. Inténtalo de nuevo.");
+    }
+});
