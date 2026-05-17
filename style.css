@@ -391,9 +391,10 @@ body {
 }
 
 .app-version-sidebar {
-    font-size: 11px;
-    color: var(--text-secondary);
-    opacity: 0.7;
+    font-size: 12px;
+    color: var(--primary);
+    opacity: 1;
+    font-weight: 600;
 }
 
 
@@ -514,8 +515,13 @@ body {
     align-items: center;
     padding: 10px 15px;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: background 0.2s, transform 0.2s;
     border-bottom: 1px solid var(--border-color);
+    will-change: transform, background;
+}
+
+.contact-item:active {
+    transform: scale(0.98);
 }
 
 .online-indicator {
@@ -1056,6 +1062,19 @@ body {
 
 .chat-input-area i:hover {
     color: var(--text-primary);
+}
+
+#send-btn {
+    color: var(--primary) !important;
+    font-size: 26px !important;
+    padding: 4px;
+    display: none; /* Controlled by JS */
+    align-items: center;
+    justify-content: center;
+}
+
+#send-btn:active {
+    transform: scale(0.9);
 }
 
 /* Botón de micrófono */

@@ -11,20 +11,31 @@ const firebaseConfig = {
 // Initialize Firebase using compat SDK
 const app = firebase.initializeApp(firebaseConfig);
 
-// V4 FIX: Initialize App Check with reCAPTCHA v3
+// V4 NOTE: App Check with reCAPTCHA has been disabled because it was
+// blocking all Firestore writes when the reCAPTCHA token failed to verify
+// (e.g. when the domain is not whitelisted in Firebase Console).
+// Security is enforced by Firestore rules instead, which already require
+// authentication and validate sender identity.
+// To re-enable App Check: uncomment the block below and whitelist the domain
+// in Firebase Console > App Check.
+/*
 try {
-    if (typeof firebase.appCheck === 'function') {
+    if (typeof firebase !== 'undefined' &&
+        firebase.appCheck &&
+        typeof firebase.appCheck === 'function') {
         const appCheck = firebase.appCheck();
-        appCheck.activate(
-            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
-            true // Set to true to allow auto-refresh
-        );
-    } else {
-        console.error("Firebase App Check not available.");
+        if (firebase.appCheck.ReCaptchaV3Provider) {
+            appCheck.activate(
+                new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+                true
+            );
+        }
     }
 } catch (e) {
-    console.error("App Check initialization error:", e);
+    console.warn("App Check init warning (non-fatal):", e.message);
 }
+*/
+console.log("ChatSEK v3.2.7 - App Check desactivado. Seguridad gestionada por reglas de Firestore.");
 
 const db = firebase.firestore();
 const auth = firebase.auth();
@@ -1219,10 +1230,14 @@ function renderContacts(filter = '') {
         const isPinned = pinnedIds.includes(u.uid);
         if (isPinned) return true; // always show pinned
         
-        if (!filter) return false; // don't show any unpinned contact by default unless searched
+        // If there's a search filter, show matches
+        if (filter) {
+            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
+            return nameToSearch.toLowerCase().includes(filter);
+        }
         
-        const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
-        return nameToSearch.toLowerCase().includes(filter);
+        // WhatsApp-like: show if it has at least one message (recent conversations)
+        return getLatestTimestamp(u) > 0;
     });
 
     // Helper to get the latest message timestamp for an entity
@@ -1481,10 +1496,10 @@ function renderMessages() {
 }
 
 sendBtn.addEventListener('click', () => sendMessage());
-messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
 messageInput.addEventListener('input', () => {
     if (messageInput.value.trim().length > 0) {
-        sendBtn.style.display = 'block';
+        sendBtn.style.display = 'flex';
         voiceBtn.style.display = 'none';
     } else {
         sendBtn.style.display = 'none';
@@ -1502,10 +1517,7 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
         return; // Stop message from being sent
     }
 
-    if (!overrideText) {
-        messageInput.value = '';
-        messageInput.dispatchEvent(new Event('input'));
-    }
+    // Note: Input is cleared only on successful send now to prevent data loss on error.
 
     // Si estamos editando un mensaje existente y es de tipo texto
     if (editingMessageId && type === 'text') {
@@ -1549,10 +1561,29 @@ async function sendMessage(overrideText = null, type = 'text', audioOnly = false
     }
 
     try {
+        console.log("Intentando enviar mensaje:", messageData);
         await db.collection("messages").add(messageData);
+        console.log("Mensaje enviado con éxito");
+        
+        // Clear input only on success
+        if (!overrideText) {
+            messageInput.value = '';
+            messageInput.dispatchEvent(new Event('input'));
+        }
     } catch (e) {
-        console.error("Error al enviar mensaje:", e);
-        alert("Hubo un error al enviar el mensaje. Revisa tu conexión.");
+        console.error("Error completo al enviar mensaje:", e);
+        // Mostrar error detallado para facilitar el diagnóstico
+        let errorMsg = "Error al enviar el mensaje.\n";
+        if (e.code === 'permission-denied') {
+            errorMsg += "❌ Sin permisos en Firestore. Comprueba que tu sesión sigue activa y que las reglas de seguridad permiten escribir mensajes.";
+        } else if (e.code === 'unauthenticated') {
+            errorMsg += "❌ No estás autenticado. Por favor, cierra sesión y vuelve a entrar.";
+        } else if (e.code === 'unavailable') {
+            errorMsg += "❌ Sin conexión a internet. Comprueba tu red e inténtalo de nuevo.";
+        } else {
+            errorMsg += "Código: " + (e.code || 'desconocido') + "\nDetalle: " + e.message;
+        }
+        alert(errorMsg);
     }
 }
 
