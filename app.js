@@ -11,31 +11,20 @@ const firebaseConfig = {
 // Initialize Firebase using compat SDK
 const app = firebase.initializeApp(firebaseConfig);
 
-// V4 NOTE: App Check with reCAPTCHA has been disabled because it was
-// blocking all Firestore writes when the reCAPTCHA token failed to verify
-// (e.g. when the domain is not whitelisted in Firebase Console).
-// Security is enforced by Firestore rules instead, which already require
-// authentication and validate sender identity.
-// To re-enable App Check: uncomment the block below and whitelist the domain
-// in Firebase Console > App Check.
-/*
+// App Check con reCAPTCHA v3 — REQUERIDO porque Firebase Console lo tiene activado
+// tanto para Auth como para Firestore. Sin esto, el login y el envío de mensajes fallan.
 try {
-    if (typeof firebase !== 'undefined' &&
-        firebase.appCheck &&
-        typeof firebase.appCheck === 'function') {
+    if (typeof firebase !== 'undefined' && typeof firebase.appCheck === 'function') {
         const appCheck = firebase.appCheck();
-        if (firebase.appCheck.ReCaptchaV3Provider) {
-            appCheck.activate(
-                new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
-                true
-            );
-        }
+        appCheck.activate(
+            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
+            true
+        );
+        console.log("ChatSEK v3.2.7 - App Check activado.");
     }
 } catch (e) {
-    console.warn("App Check init warning (non-fatal):", e.message);
+    console.error("App Check error:", e.message);
 }
-*/
-console.log("ChatSEK v3.2.7 - App Check desactivado. Seguridad gestionada por reglas de Firestore.");
 
 const db = firebase.firestore();
 const auth = firebase.auth();
