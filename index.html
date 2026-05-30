@@ -160,106 +160,12 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 3.2.7</div>
+                    <div class="app-version-sidebar">Version 3.2.8</div>
                 </div>
             </div>
-        </div>
 
-
-        <!-- Directory Modal -->
-        <div id="directory-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Directorio de Usuarios</h2>
-                    <i class="fas fa-times" id="close-directory-modal"></i>
-                </div>
-                <div class="modal-body">
-                    <div class="search-bar">
-                        <div class="search-input">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="directory-search" placeholder="Buscar por nombre o número...">
-                        </div>
-                    </div>
-                    <div id="directory-list" class="directory-list">
-                        <!-- Users will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Group Creation Modal -->
-        <div id="group-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Crear Nuevo Grupo</h2>
-                    <i class="fas fa-times" id="close-group-modal"></i>
-                </div>
-                <div class="modal-body">
-                    <div class="group-form">
-                        <div class="input-group">
-                            <i class="fas fa-users"></i>
-                            <input type="text" id="group-name" placeholder="Nombre del grupo" required>
-                        </div>
-                        <div class="input-group" style="margin-top: 15px;">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="member-search" placeholder="Buscar contactos para añadir...">
-                        </div>
-                        <h3 style="margin-top: 15px;">Selecciona los miembros:</h3>
-                        <div class="member-selection-list" id="member-selection-list">
-                            <!-- Contact list with checkboxes will be here -->
-                        </div>
-                        <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear
-                            Grupo</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Admin Panel Modal -->
-        <div id="admin-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Panel de Control - Usuarios</h2>
-                    <i class="fas fa-times" id="close-admin-modal"></i>
-                </div>
-                <div class="modal-body">
-                    <div class="admin-grid">
-                        <!-- Create/Edit User Form -->
-                        <div class="admin-card">
-                            <h3 id="admin-form-title">Crear Nuevo Usuario</h3>
-                            <form id="admin-create-user-form">
-                                <input type="text" id="new-user-name" placeholder="Nombre completo" required>
-                                <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
-                                <div id="password-container">
-                                    <input type="password" id="new-user-password"
-                                        placeholder="Contraseña (solo para nuevos)" required>
-                                </div>
-                                <select id="new-user-role">
-                                    <option value="usuario">Usuario</option>
-                                    <option value="admin" id="opt-role-admin" style="display: none;">Admin</option>
-                                    <option value="super_admin" id="opt-role-superadmin" style="display: none;">
-                                        Super Admin</option>
-                                </select>
-                                <div class="form-actions" style="display: flex; gap: 10px;">
-                                    <button type="submit" class="btn-login" id="admin-form-submit">Registrar
-                                        Usuario</button>
-                                    <button type="button" class="btn-secondary" id="admin-form-cancel"
-                                        style="display: none;">Cancelar</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                    <!-- User List -->
-                    <div class="admin-card">
-                        <h3>Lista de Usuarios</h3>
-                        <div class="admin-user-list" id="admin-user-list">
-                            <!-- Dynamically loaded -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Main Chat Area -->
-        <div class="main-chat">
+            <!-- Main Chat Area -->
+            <div class="main-chat">
             <!-- Chat Header -->
             <div class="chat-header">
                 <div class="chat-header-info">
@@ -355,7 +261,88 @@
                 <div id="dialpad-error" class="dial-error"></div>
             </div>
         </div>
+        </div>
     </div>
+
+    <!-- Directory Modal -->
+    <div id="directory-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Directorio de Usuarios</h2>
+                <i class="fas fa-times" id="close-directory-modal"></i>
+            </div>
+            <div class="modal-body">
+                <div class="search-bar">
+                    <div class="search-input">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="directory-search" placeholder="Buscar por nombre o número...">
+                    </div>
+                </div>
+                <div id="directory-list" class="directory-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Creation Modal -->
+    <div id="group-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Crear Nuevo Grupo</h2>
+                <i class="fas fa-times" id="close-group-modal"></i>
+            </div>
+            <div class="modal-body">
+                <div class="group-form">
+                    <div class="input-group">
+                        <i class="fas fa-users"></i>
+                        <input type="text" id="group-name" placeholder="Nombre del grupo" required>
+                    </div>
+                    <div class="input-group" style="margin-top: 15px;">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="member-search" placeholder="Buscar contactos para añadir...">
+                    </div>
+                    <h3 style="margin-top: 15px;">Selecciona los miembros:</h3>
+                    <div class="member-selection-list" id="member-selection-list"></div>
+                    <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear Grupo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel Modal -->
+    <div id="admin-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Panel de Control - Usuarios</h2>
+                <i class="fas fa-times" id="close-admin-modal"></i>
+            </div>
+            <div class="modal-body">
+                <div class="admin-grid">
+                    <div class="admin-card">
+                        <h3 id="admin-form-title">Crear Nuevo Usuario</h3>
+                        <form id="admin-create-user-form">
+                            <input type="text" id="new-user-name" placeholder="Nombre completo" required>
+                            <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
+                            <div id="password-container">
+                                <input type="password" id="new-user-password" placeholder="Contraseña (solo para nuevos)" required>
+                            </div>
+                            <select id="new-user-role">
+                                <option value="usuario">Usuario</option>
+                                <option value="admin" id="opt-role-admin" style="display: none;">Admin</option>
+                                <option value="super_admin" id="opt-role-superadmin" style="display: none;">Super Admin</option>
+                            </select>
+                            <div class="form-actions" style="display: flex; gap: 10px;">
+                                <button type="submit" class="btn-login" id="admin-form-submit">Registrar Usuario</button>
+                                <button type="button" class="btn-secondary" id="admin-form-cancel" style="display: none;">Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="admin-card">
+                    <h3>Lista de Usuarios</h3>
+                    <div class="admin-user-list" id="admin-user-list"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- SEK-Time Video Call Modal -->
