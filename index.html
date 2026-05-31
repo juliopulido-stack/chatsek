@@ -160,12 +160,11 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 3.2.9</div>
+                    <div class="app-version-sidebar">Version 3.3.0</div>
                 </div>
             </div>
             <!-- Main Chat Area -->
             <div class="main-chat">
-            <!-- Chat Header -->
             <div class="chat-header">
                 <div class="chat-header-info">
                     <i class="fas fa-chevron-left" id="btn-back-sidebar"
@@ -264,6 +263,52 @@
         </div>
     </div>
 
+    <!-- SEK-Time Video Call Modal -->
+    <div id="call-modal" class="modal">
+        <div class="modal-content call-modal-content">
+            <div class="modal-header call-modal-header">
+                <div class="call-info">
+                    <i class="fas fa-video"></i>
+                    <h2 id="call-title">SEK-Time: Llamada en curso</h2>
+                </div>
+                <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
+            </div>
+            <div id="jitsi-container"></div>
+            <div id="jitsi-loader" class="jitsi-hidden">
+                <div class="spinner"></div>
+                <p>Conectando con SEK-Time...</p>
+                <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">Si tarda demasiado, comprueba tu conexión.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Overlay -->
+    <div id="incoming-call-overlay" class="calling-overlay">
+        <div class="calling-container">
+            <img src="" id="caller-avatar" class="caller-avatar" alt="Caller">
+            <div class="calling-text">
+                <h2 id="caller-name">Nombre</h2>
+                <p id="call-type-text">Videollamada entrante...</p>
+            </div>
+            <div class="calling-actions">
+                <button id="btn-accept-call" class="btn-call-action accept">
+                    <i class="fas fa-phone"></i>
+                </button>
+                <button id="btn-decline-call" class="btn-call-action decline">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
+
+    <script src="app.js"></script>
 
 
         <!-- Directory Modal -->
@@ -358,52 +403,6 @@
                 </div>
             </div>
         </div>
-    <!-- SEK-Time Video Call Modal -->
-    <div id="call-modal" class="modal">
-        <div class="modal-content call-modal-content">
-            <div class="modal-header call-modal-header">
-                <div class="call-info">
-                    <i class="fas fa-video"></i>
-                    <h2 id="call-title">SEK-Time: Llamada en curso</h2>
-                </div>
-                <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
-            </div>
-            <div id="jitsi-container"></div>
-            <div id="jitsi-loader" class="jitsi-hidden">
-                <div class="spinner"></div>
-                <p>Conectando con SEK-Time...</p>
-                <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">Si tarda demasiado, comprueba tu conexión.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Incoming Call Overlay -->
-    <div id="incoming-call-overlay" class="calling-overlay">
-        <div class="calling-container">
-            <img src="" id="caller-avatar" class="caller-avatar" alt="Caller">
-            <div class="calling-text">
-                <h2 id="caller-name">Nombre</h2>
-                <p id="call-type-text">Videollamada entrante...</p>
-            </div>
-            <div class="calling-actions">
-                <button id="btn-accept-call" class="btn-call-action accept">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button id="btn-decline-call" class="btn-call-action decline">
-                    <i class="fas fa-phone-slash"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
-
-    <script src="app.js"></script>
 </body>
 
 </html>
