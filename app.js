@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.2.8 - App Check activado.");
+        console.log("ChatSEK v3.2.9 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -1045,108 +1045,61 @@ function updateHeaderStatus() {
 }
 
 function setupMessagesListener() {
-    // SECURITY FIX: Instead of reading all messages (which the new Firestore rules block),
-    // we run two separate queries — messages sent by me and messages received by me —
-    // then merge them client-side. Group messages are handled by the groups listener.
-    const uid = auth.currentUser.uid;
-    let sentMessages = {};
-    let receivedMessages = {};
-    let groupMessages = {};
+    unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
+        .onSnapshot((snapshot) => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === "added") {
+                    const msg = { id: change.doc.id, ...change.doc.data() };
+                    const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                    const isNew = msgTime > listenerStartTime;
 
-    function processAndMerge(snapshot, bucket, isAdded) {
-        snapshot.docChanges().forEach(change => {
-            const msg = { id: change.doc.id, ...change.doc.data() };
-            if (change.type === "added" || change.type === "modified") {
-                bucket[msg.id] = msg;
-            } else if (change.type === "removed") {
-                delete bucket[msg.id];
-            }
-
-            if (change.type === "added" && isAdded) {
-                const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
-                const isNew = msgTime > listenerStartTime;
-
-                // Detect Incoming Call
-                if (msg.type === 'call' && msg.receiverId === uid) {
-                    const thirtySecondsAgo = Date.now() - 30000;
-                    if (msgTime > thirtySecondsAgo && isNew) {
-                        handleIncomingCall(msg);
+                    // Detect Incoming Call
+                    if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
+                        const thirtySecondsAgo = Date.now() - 30000;
+                        if (msgTime > thirtySecondsAgo && isNew) {
+                            handleIncomingCall(msg);
+                        }
                     }
-                }
 
-                // Browser notification for new messages
-                if (isNew && msg.senderId !== uid && msg.type !== 'call') {
-                    const isDirectToMe = msg.receiverId === uid;
-                    const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
-                    if (isDirectToMe || isGroupWithMe) {
-                        const chatIsOpen = activeChatUser && (
-                            activeChatUser.uid === msg.senderId ||
-                            (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
-                        );
-                        if (chatIsOpen && document.visibilityState === 'visible') {
-                            readMessageIds.add(msg.id);
-                            db.collection("messages").doc(msg.id).update({
-                                readBy: firebase.firestore.FieldValue.arrayUnion(uid)
-                            });
-                        } else {
-                            sendBrowserNotification(msg);
+                    // Browser notification for new messages (not from self, not calls)
+                    if (isNew && msg.senderId !== auth.currentUser.uid && msg.type !== 'call') {
+                        const isDirectToMe = msg.receiverId === auth.currentUser.uid;
+                        const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
+
+                        if (isDirectToMe || isGroupWithMe) {
+                            // Auto-read if the chat is currently open and the tab is visible
+                            const chatIsOpen = activeChatUser && (
+                                activeChatUser.uid === msg.senderId ||
+                                (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
+                            );
+
+                            if (chatIsOpen && document.visibilityState === 'visible') {
+                                // Marcar en Set local Y en Firestore
+                                readMessageIds.add(msg.id);
+                                db.collection("messages").doc(msg.id).update({
+                                    readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
+                                });
+                            } else {
+                                // Show browser notification
+                                sendBrowserNotification(msg);
+                            }
                         }
                     }
                 }
-            }
+            });
+
+            allMessages = [];
+            snapshot.forEach((doc) => {
+                const msg = { id: doc.id, ...doc.data() };
+                allMessages.push(msg);
+                // Si Firestore ya tiene este mensaje como leído por mí, añadirlo al Set local
+                if (msg.readBy && auth.currentUser && msg.readBy.includes(auth.currentUser.uid)) {
+                    readMessageIds.add(msg.id);
+                }
+            });
+            renderContacts();
+            if (activeChatUser) renderMessages();
         });
-
-        // Merge all buckets, sort by timestamp, update global allMessages
-        const merged = Object.values({...sentMessages, ...receivedMessages, ...groupMessages});
-        merged.sort((a, b) => {
-            const ta = a.timestamp ? (typeof a.timestamp.toMillis === 'function' ? a.timestamp.toMillis() : 0) : 0;
-            const tb = b.timestamp ? (typeof b.timestamp.toMillis === 'function' ? b.timestamp.toMillis() : 0) : 0;
-            return ta - tb;
-        });
-        allMessages = merged;
-
-        // Update read set
-        allMessages.forEach(msg => {
-            if (msg.readBy && msg.readBy.includes(uid)) {
-                readMessageIds.add(msg.id);
-            }
-        });
-
-        renderContacts();
-        if (activeChatUser) renderMessages();
-    }
-
-    // Query 1: Messages I sent
-    const unsubSent = db.collection("messages")
-        .where("senderId", "==", uid)
-        .orderBy("timestamp", "asc")
-        .onSnapshot(snap => processAndMerge(snap, sentMessages, true));
-
-    // Query 2: Messages received by me (direct)
-    const unsubReceived = db.collection("messages")
-        .where("receiverId", "==", uid)
-        .orderBy("timestamp", "asc")
-        .onSnapshot(snap => processAndMerge(snap, receivedMessages, true));
-
-    // Query 3: Group messages (for groups I belong to — handled per groupId)
-    // We re-subscribe when groups change, but for now listen for any groupId in my groups
-    function subscribeGroupMessages() {
-        const myGroupIds = allGroups.map(g => g.uid);
-        if (myGroupIds.length === 0) return;
-        // Firestore 'in' supports up to 30 values
-        const chunks = [];
-        for (let i = 0; i < myGroupIds.length; i += 30) chunks.push(myGroupIds.slice(i, i + 30));
-        chunks.forEach(chunk => {
-            db.collection("messages")
-                .where("groupId", "in", chunk)
-                .orderBy("timestamp", "asc")
-                .onSnapshot(snap => processAndMerge(snap, groupMessages, true));
-        });
-    }
-    subscribeGroupMessages();
-
-    // Store combined unsubscribe
-    unsubscribeMessages = () => { unsubSent(); unsubReceived(); };
 }
 
 // --- Browser Notifications ---
@@ -1258,25 +1211,7 @@ function renderContacts(filter = '') {
     // Merge Users and Groups
     let combined = [...allGroups, ...allUsers];
 
-    // Filter by name (only show if filter is provided, or if they are pinned)
-    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
-    
-    // Only keep those matching filter, OR those that are pinned
-    combined = combined.filter(u => {
-        const isPinned = pinnedIds.includes(u.uid);
-        if (isPinned) return true; // always show pinned
-        
-        // If there's a search filter, show matches
-        if (filter) {
-            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
-            return nameToSearch.toLowerCase().includes(filter);
-        }
-        
-        // WhatsApp-like: show if it has at least one message (recent conversations)
-        return getLatestTimestamp(u) > 0;
-    });
-
-    // Helper to get the latest message timestamp for an entity
+    // Helper to get the latest message timestamp — declared BEFORE use to avoid TDZ error
     const getLatestTimestamp = (entity) => {
         if (!auth.currentUser) return 0;
         const isGroup = entity.isGroup;
@@ -1294,6 +1229,24 @@ function renderContacts(filter = '') {
         }
         return 0;
     };
+
+    // Filter by name (only show if filter is provided, or if they are pinned)
+    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
+    
+    // Only keep those matching filter, OR those that are pinned
+    combined = combined.filter(u => {
+        const isPinned = pinnedIds.includes(u.uid);
+        if (isPinned) return true; // always show pinned
+        
+        // If there's a search filter, show matches
+        if (filter) {
+            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
+            return nameToSearch.toLowerCase().includes(filter);
+        }
+        
+        // WhatsApp-like: show if it has at least one message (recent conversations)
+        return getLatestTimestamp(u) > 0;
+    });
 
     // Sorting Logic: Pinned first, then by last message time
     combined.sort((a, b) => {
