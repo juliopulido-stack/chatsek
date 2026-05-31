@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.2.9 - App Check activado.");
+        console.log("ChatSEK v3.3.0 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -1211,7 +1211,7 @@ function renderContacts(filter = '') {
     // Merge Users and Groups
     let combined = [...allGroups, ...allUsers];
 
-    // Helper to get the latest message timestamp — declared BEFORE use to avoid TDZ error
+    // ── Helper declared FIRST to avoid TDZ ReferenceError ──
     const getLatestTimestamp = (entity) => {
         if (!auth.currentUser) return 0;
         const isGroup = entity.isGroup;
@@ -1225,39 +1225,30 @@ function renderContacts(filter = '') {
             if (last.timestamp) {
                 return typeof last.timestamp.toMillis === 'function' ? last.timestamp.toMillis() : Date.now();
             }
-            return Date.now(); // optimistic local message
+            return Date.now(); // optimistic: message just sent, no server timestamp yet
         }
         return 0;
     };
 
-    // Filter by name (only show if filter is provided, or if they are pinned)
     const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
-    
-    // Only keep those matching filter, OR those that are pinned
+
+    // Show: pinned always, search matches, or any chat with at least one message (WhatsApp-style)
     combined = combined.filter(u => {
-        const isPinned = pinnedIds.includes(u.uid);
-        if (isPinned) return true; // always show pinned
-        
-        // If there's a search filter, show matches
+        if (pinnedIds.includes(u.uid)) return true;
         if (filter) {
             const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
             return nameToSearch.toLowerCase().includes(filter);
         }
-        
-        // WhatsApp-like: show if it has at least one message (recent conversations)
         return getLatestTimestamp(u) > 0;
     });
 
-    // Sorting Logic: Pinned first, then by last message time
+    // ── Sort: pinned first, then by most recent message (newest at top) ──
     combined.sort((a, b) => {
         const aPinned = pinnedIds.includes(a.uid);
         const bPinned = pinnedIds.includes(b.uid);
-
         if (aPinned && !bPinned) return -1;
         if (!aPinned && bPinned) return 1;
-
-        // If both pinned or both unpinned, sort by newest message (descending)
-        return getLatestTimestamp(b) - getLatestTimestamp(a);
+        return getLatestTimestamp(b) - getLatestTimestamp(a); // newest first
     });
 
     combined.forEach(entity => {
@@ -1297,6 +1288,31 @@ function renderContacts(filter = '') {
         const unreadCount = getUnreadCount(entity);
         const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
 
+        // ── Online / last-seen line for contact list ──
+        let contactStatusHtml = '';
+        if (!isGroup) {
+            if (entity.status === 'online') {
+                contactStatusHtml = `<span class="contact-status online-text">en línea</span>`;
+            } else if (entity.lastSeen) {
+                const d = entity.lastSeen.toDate ? entity.lastSeen.toDate() : new Date(entity.lastSeen);
+                const now = new Date();
+                const hh = d.getHours().toString().padStart(2, '0');
+                const mm = d.getMinutes().toString().padStart(2, '0');
+                const isToday = d.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = d.toDateString() === yesterday.toDateString();
+                let timeStr;
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${d.getDate()}/${d.getMonth() + 1} a las ${hh}:${mm}`;
+                contactStatusHtml = `<span class="contact-status offline-text">última vez ${timeStr}</span>`;
+            } else {
+                contactStatusHtml = `<span class="contact-status offline-text">desconectado</span>`;
+            }
+        } else {
+            contactStatusHtml = `<span class="contact-status offline-text">${entity.members ? entity.members.length + ' miembros' : 'Grupo'}</span>`;
+        }
+
         item.innerHTML = `
             ${indicator}
             <img src="${avatar}">
@@ -1308,6 +1324,7 @@ function renderContacts(filter = '') {
                         <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
                     </div>
                 </div>
+                <div class="contact-status-row">${contactStatusHtml}</div>
                 <div class="contact-message-row">
                     <div class="contact-message">${lastText}</div>
                     ${unreadBadge}
