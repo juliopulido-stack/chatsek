@@ -590,6 +590,24 @@ body {
     gap: 8px;
 }
 
+.contact-status-row {
+    margin: 1px 0 2px 0;
+}
+
+.contact-status {
+    font-size: 11px;
+    display: block;
+}
+
+.contact-status.online-text {
+    color: #22c55e;
+    font-weight: 500;
+}
+
+.contact-status.offline-text {
+    color: var(--text-secondary);
+}
+
 .contact-message {
     font-size: 14px;
     color: var(--text-secondary);
@@ -864,24 +882,40 @@ body {
     border-radius: 7px;
     font-size: 14.2px;
     line-height: 19px;
-    color: var(--msg-text);
+    color: var(--text-primary);
     position: relative;
-    box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13);
+    box-shadow: 0 1px 2px rgba(66, 165, 245, 0.15);
     animation: slideUp 0.3s ease;
+}
+
+/* Sent messages: blue background, white text */
+.message.sent {
+    color: #ffffff;
+}
+
+/* Received messages: white background, dark text */
+.message.received {
+    color: var(--text-primary);
 }
 
 .message .time {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.7);
     float: right;
     margin-top: 10px;
     margin-left: 10px;
+}
+
+/* Time on received messages should be dark */
+.message.received .time {
+    color: var(--text-secondary);
 }
 
 .message.received {
     align-self: flex-start;
     background-color: var(--msg-in);
     border-top-left-radius: 0;
+    border: 1px solid var(--border-color);
 }
 
 .message.received::before {
@@ -913,6 +947,14 @@ body {
 }
 
 /* Opciones de mensaje y edición */
+.message.sent .message-options-btn {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.message.received .message-options-btn {
+    color: var(--text-secondary);
+}
+
 .message-options-btn {
     position: absolute;
     top: 2px;
