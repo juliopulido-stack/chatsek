@@ -1,3 +1,630 @@
+// Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyChRpWOi8UON6LvU3ERmSNQ04IwtRUoZDc",
+    authDomain: "chatprivado-33d21.firebaseapp.com",
+    projectId: "chatprivado-33d21",
+    storageBucket: "chatprivado-33d21.firebasestorage.app",
+    messagingSenderId: "823294283727",
+    appId: "1:823294283727:web:f3df8f62461ed1d0004cba"
+};
+
+// Initialize Firebase using compat SDK
+const app = firebase.initializeApp(firebaseConfig);
+
+// App Check con reCAPTCHA v3 — REQUERIDO porque Firebase Console lo tiene activado
+// tanto para Auth como para Firestore. Sin esto, el login y el envío de mensajes fallan.
+try {
+    if (typeof firebase !== 'undefined' && typeof firebase.appCheck === 'function') {
+        const appCheck = firebase.appCheck();
+        appCheck.activate(
+            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9s'),
+            true
+        );
+        console.log("ChatSEK v3.2.7 - App Check activado.");
+    }
+} catch (e) {
+    console.error("App Check error:", e.message);
+}
+
+const db = firebase.firestore();
+const auth = firebase.auth();
+const storage = firebase.storage();
+
+// ─── Security Helper: XSS Prevention ───────────────────────────────────────
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+}
+
+// State
+let currentUserData = null;
+let activeChatUser = null;
+let allMessages = [];
+let allUsers = [];
+let allGroups = [];
+let myStream = null;
+let currentCallId = null;
+let isAudioOnlyCall = false;
+let isCaller = false;
+let webrtcInitTimeout = null;
+let audioContext = null;
+
+// New message mechanics
+let editingMessageId = null;
+let replyingToMessage = null;
+let isUserBanned = false; // New global ban state
+let unsubscribeMessages = null;
+let unsubscribeUsers = null;
+let unsubscribeGroups = null;
+let editingUserId = null;
+let jitsiApi = null;
+let processedCallIds = new Set(); // To avoid duplicate alerts
+let readMessageIds = new Set();   // IDs de mensajes ya leídos localmente
+let listenerStartTime = Date.now(); // Used to filter out old messages upon login
+
+// Voice Recording State (Removed duplicate variables)
+
+// Inactivity Settings
+let idleTimeout;
+let logoutTimeout;
+const IDLE_TIME_LIMIT = 5 * 60 * 1000; // 5 minutes
+const LOGOUT_TIME_LIMIT = 2 * 60 * 1000; // 2 minutes
+
+// DOM Elements
+const loginScreen = document.getElementById('login-screen');
+const chatScreen = document.getElementById('chat-screen');
+const loginForm = document.getElementById('login-form');
+const emailInput = document.getElementById('email');
+const passwordInput = document.getElementById('password');
+const errorMessage = document.getElementById('error-message');
+const forgotPasswordBtn = document.getElementById('forgot-password');
+
+const myProfileImg = document.getElementById('my-profile-img');
+const currentUserName = document.getElementById('current-user-name');
+const btnLogout = document.getElementById('btn-logout');
+const btnAdminPanel = document.getElementById('btn-admin-panel');
+
+const contactList = document.getElementById('contact-list');
+const activeContactName = document.getElementById('active-contact-name');
+const activeContactImg = document.getElementById('active-contact-img');
+const chatHeaderInfo = document.querySelector('.chat-header-info');
+const chatHeaderText = document.querySelector('.chat-header-text');
+const chatStatus = document.querySelector('.status');
+const chatMessages = document.getElementById('chat-messages');
+const welcomeMessage = document.getElementById('welcome-message');
+const chatInputArea = document.getElementById('chat-input-area');
+const messageInput = document.getElementById('message-input');
+const sendBtn = document.getElementById('send-btn');
+const voiceBtn = document.getElementById('voice-btn');
+
+// --- Audio Recording Logic ---
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingTimerInterval = null;
+let recordingSeconds = 0;
+let recordingCancelled = false;
+
+const recordingBar = document.getElementById('recording-bar');
+const recordingTimerEl = document.getElementById('recording-timer');
+// cancelRecording y send-recording se obtienen lazy porque pueden ser null al cargar
+
+function startRecording() {
+    if (!activeChatUser) return;
+    recordingCancelled = false;
+    audioChunks = [];
+    recordingSeconds = 0;
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+
+        // Elegir el mejor formato disponible
+        const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
+            .find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+        try {
+            mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+        } catch (e) {
+            mediaRecorder = new MediaRecorder(stream);
+        }
+
+        // Recoger chunks continuamente
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+                audioChunks.push(e.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            stopRecordingUI();
+
+            if (recordingCancelled) return;
+            if (audioChunks.length === 0) {
+                alert("No se grabó nada. Inténtalo de nuevo.");
+                return;
+            }
+
+            const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
+            const blob = new Blob(audioChunks, { type: mimeUsed });
+
+            if (blob.size > 900 * 1024) {
+                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
+                return;
+            }
+
+            // Subir a Firebase Storage y enviar URL
+            const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
+            const storageRef = storage.ref().child(`chat_audios/${fileName}`);
+
+            storageRef.put(blob).then(snapshot => {
+                return snapshot.ref.getDownloadURL();
+            }).then(url => {
+                sendMessage(url, 'audio').catch(err => console.error(err));
+            }).catch(err => {
+                console.error("Error subiendo audio:", err);
+                alert("Error al subir la nota de voz.");
+            });
+        };
+
+        mediaRecorder.start(250); // chunk cada 250ms — más fiable
+        startRecordingUI();
+
+    }).catch((err) => {
+        console.error("Micrófono error:", err);
+        alert("No se pudo acceder al micrófono. Comprueba los permisos.");
+    });
+}
+
+function stopRecording(cancel = false) {
+    if (!mediaRecorder) return;
+    if (mediaRecorder.state === 'inactive') return;
+    recordingCancelled = cancel;
+    mediaRecorder.stop(); // onstop se dispara cuando termina — no tocar nada más
+}
+
+function startRecordingUI() {
+    recordingBar.style.display = 'flex';
+    chatInputArea.style.display = 'none';
+    voiceBtn.classList.add('recording');
+    recordingSeconds = 0;
+    recordingTimerEl.textContent = '0:00';
+    recordingTimerInterval = setInterval(() => {
+        recordingSeconds++;
+        const m = Math.floor(recordingSeconds / 60);
+        const s = recordingSeconds % 60;
+        recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+        // Límite de 30 segundos
+        if (recordingSeconds >= 30) stopRecording(false);
+    }, 1000);
+}
+
+// Clic en micro: empezar o parar grabación (sin enviar)
+voiceBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isRecording) {
+        isRecording = true;
+        startRecording();
+    } else {
+        isRecording = false;
+        stopRecording(true); // parar SIN enviar — el botón enviar es el que envía
+    }
+});
+
+// Botones de grabación — usar listeners permanentes montados sobre el document si no coge bien a la primera
+document.addEventListener('click', (e) => {
+    const btnSend = e.target.closest('#send-recording');
+    const btnCancel = e.target.closest('#cancel-recording');
+
+    if (btnSend) {
+        e.preventDefault();
+        e.stopPropagation();
+        isRecording = false;
+        stopRecording(false);
+    }
+
+    if (btnCancel) {
+        e.preventDefault();
+        e.stopPropagation();
+        isRecording = false;
+        stopRecording(true);
+    }
+});
+
+// Admin Modal Elements
+const adminModal = document.getElementById('admin-modal');
+const closeAdminModal = document.getElementById('close-admin-modal');
+const adminUserList = document.getElementById('admin-user-list');
+const adminCreateForm = document.getElementById('admin-create-user-form');
+const adminFormTitle = document.getElementById('admin-form-title');
+const adminFormSubmit = document.getElementById('admin-form-submit');
+const adminFormCancel = document.getElementById('admin-form-cancel');
+const optRoleAdmin = document.getElementById('opt-role-admin');
+const optRoleSuperAdmin = document.getElementById('opt-role-superadmin');
+const passwordContainer = document.getElementById('password-container');
+const newUserPassword = document.getElementById('new-user-password');
+
+// Call Modal Elements
+const callModal = document.getElementById('call-modal');
+const btnVideoCall = document.getElementById('btn-video-call');
+const btnVoiceCall = document.getElementById('btn-voice-call');
+const btnEndCall = document.getElementById('btn-end-call');
+const jitsiContainer = document.getElementById('jitsi-container');
+
+// Incoming Call Elements
+const incomingCallOverlay = document.getElementById('incoming-call-overlay');
+const callerAvatar = document.getElementById('caller-avatar');
+const callerName = document.getElementById('caller-name');
+const callTypeText = document.getElementById('call-type-text');
+const btnAcceptCall = document.getElementById('btn-accept-call');
+const btnDeclineCall = document.getElementById('btn-decline-call');
+
+// Group Modal Elements
+const btnNewGroup = document.getElementById('btn-new-group');
+const groupModal = document.getElementById('group-modal');
+const closeGroupModal = document.getElementById('close-group-modal');
+const memberSelectionList = document.getElementById('member-selection-list');
+const btnCreateGroupSubmit = document.getElementById('btn-create-group-submit');
+
+// Dial Pad Elements
+const dialpadModal = document.getElementById('dialpad-modal');
+const btnOpenDialpad = document.getElementById('btn-dialpad');
+const closeDialpadModal = document.getElementById('close-dialpad-modal');
+const dialpadNumberDisplay = document.getElementById('dialpad-number');
+const btnDialpadDelete = document.getElementById('btn-dialpad-delete');
+const btnDialpadCall = document.getElementById('btn-dialpad-call');
+const dialpadError = document.getElementById('dialpad-error');
+const dialBtns = document.querySelectorAll('.dial-btn');
+let currentDialedNumber = "";
+
+// Directory Elements
+const directoryModal = document.getElementById('directory-modal');
+const btnOpenDirectory = document.getElementById('btn-directory');
+const closeDirectoryModal = document.getElementById('close-directory-modal');
+const directorySearchInput = document.getElementById('directory-search');
+const directoryList = document.getElementById('directory-list');
+
+// Mobile Back Button
+const btnBackSidebar = document.getElementById('btn-back-sidebar');
+const appContainer = document.querySelector('.app-container');
+
+// --- Group Management Logic ---
+btnNewGroup.addEventListener('click', () => {
+    groupModal.classList.add('active');
+    renderMemberSelection();
+});
+
+closeGroupModal.addEventListener('click', () => {
+    groupModal.classList.remove('active');
+    groupNameInput.value = '';
+    memberSearchInput.value = '';
+});
+
+memberSearchInput.addEventListener('input', () => {
+    renderMemberSelection(memberSearchInput.value.trim().toLowerCase());
+});
+
+function renderMemberSelection(filter = '') {
+    // Keep track of currently checked ones so we don't lose them on re-render
+    const checkedUids = Array.from(memberSelectionList.querySelectorAll('input:checked'))
+        .map(input => input.value);
+
+    memberSelectionList.innerHTML = '';
+
+    // Filter users (excluding self)
+    const filteredUsers = allUsers.filter(user => {
+        if (user.uid === auth.currentUser.uid) return false;
+        if (!filter) return true;
+        return user.name.toLowerCase().includes(filter) || user.email.toLowerCase().includes(filter);
+    });
+
+    if (filteredUsers.length === 0) {
+        memberSelectionList.innerHTML = '<div style="color: var(--text-secondary); padding: 10px; text-align: center;">No se encontraron contactos</div>';
+        return;
+    }
+
+    filteredUsers.forEach(user => {
+        const item = document.createElement('div');
+        item.className = 'member-item';
+        const isChecked = checkedUids.includes(user.uid) ? 'checked' : '';
+        item.innerHTML = `
+            <input type="checkbox" id="check-${user.uid}" value="${user.uid}" ${isChecked}>
+            <label for="check-${user.uid}">${user.name} (${user.email})</label>
+        `;
+        memberSelectionList.appendChild(item);
+    });
+}
+
+btnCreateGroupSubmit.addEventListener('click', async () => {
+    const name = groupNameInput.value.trim();
+    if (!name) return alert("Por favor, ponle un nombre al grupo.");
+
+    const selectedMembers = Array.from(memberSelectionList.querySelectorAll('input:checked'))
+        .map(input => input.value);
+
+    if (selectedMembers.length === 0) return alert("Selecciona al menos un miembro.");
+
+    // Include self
+    selectedMembers.push(auth.currentUser.uid);
+
+    try {
+        await db.collection("groups").add({
+            name: name,
+            members: selectedMembers,
+            createdBy: auth.currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        groupModal.classList.remove('active');
+        groupNameInput.value = '';
+        alert("¡Grupo creado con éxito!");
+    } catch (e) {
+        alert("Error creando grupo: " + e.message);
+    }
+});
+
+// Mobile Back Button
+btnBackSidebar.addEventListener('click', () => {
+    appContainer.classList.remove('show-chat');
+});
+
+// --- Dial Pad Logic ---
+btnOpenDialpad.addEventListener('click', () => {
+    currentDialedNumber = "";
+    dialpadNumberDisplay.textContent = "";
+    dialpadError.textContent = "";
+    dialpadModal.classList.add('active');
+});
+
+closeDialpadModal.addEventListener('click', () => {
+    dialpadModal.classList.remove('active');
+});
+
+dialBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const val = btn.getAttribute('data-val');
+        if (val) {
+            if (currentDialedNumber.length < 4) {
+                currentDialedNumber += val;
+                dialpadNumberDisplay.textContent = currentDialedNumber;
+                dialpadError.textContent = "";
+            }
+        }
+    });
+});
+
+btnDialpadDelete.addEventListener('click', () => {
+    currentDialedNumber = currentDialedNumber.slice(0, -1);
+    dialpadNumberDisplay.textContent = currentDialedNumber;
+    dialpadError.textContent = "";
+});
+
+btnDialpadCall.addEventListener('click', async () => {
+    if (currentDialedNumber.length < 4) {
+        dialpadError.textContent = "El número debe tener 4 dígitos";
+        return;
+    }
+
+    try {
+        const snapshot = await db.collection("users").where("phoneNumber", "==", currentDialedNumber).get();
+        if (snapshot.empty) {
+            dialpadError.textContent = "Usuario no encontrado";
+            return;
+        }
+
+        // We search in allUsers to get the full entity object
+        const entity = allUsers.find(u => u.phoneNumber === currentDialedNumber);
+
+        if (entity) {
+            dialpadModal.classList.remove('active');
+            startCall(false, false, entity); // Direct Call
+        } else {
+            dialpadError.textContent = "Error al abrir el chat";
+        }
+    } catch (e) {
+        console.error("Dialpad search error:", e);
+        dialpadError.textContent = "Error en la búsqueda";
+    }
+});
+
+// --- Directory Logic ---
+btnOpenDirectory.addEventListener('click', () => {
+    directoryModal.classList.add('active');
+    directorySearchInput.value = "";
+    renderDirectory();
+});
+
+closeDirectoryModal.addEventListener('click', () => {
+    directoryModal.classList.remove('active');
+});
+
+directorySearchInput.addEventListener('input', () => {
+    renderDirectory(directorySearchInput.value.trim().toLowerCase());
+});
+
+function renderDirectory(filter = "") {
+    directoryList.innerHTML = "";
+
+    // V6 FIX: Directory now shows ONLY users registered in Firestore.
+    // No personal data is hardcoded in the source code.
+    const displayList = allUsers.map(u => ({
+        uid: u.uid,
+        name: u.name,
+        phoneNumber: u.phoneNumber,
+        isRegistered: true
+    }));
+
+    // Filter and Sort
+    const filtered = displayList.filter(u => {
+        if (!filter) return true;
+        return u.name.toLowerCase().includes(filter) ||
+               (u.phoneNumber && u.phoneNumber.includes(filter));
+    });
+
+    if (filtered.length === 0) {
+        directoryList.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">No se encontraron usuarios</div>';
+        return;
+    }
+
+    // Sort by name
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+    filtered.forEach(user => {
+        const item = document.createElement('div');
+        item.className = "directory-item";
+        // V3 FIX: escape user data before inserting into innerHTML
+        const safeName = escapeHtml(user.name);
+        const safePhone = escapeHtml(user.phoneNumber || '—');
+        const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random&color=fff`;
+
+        item.innerHTML = `
+            <div class="directory-item-info">
+                <img src="${avatar}">
+                <div class="directory-item-text">
+                    <h4>${safeName}</h4>
+                    <span>SEK: ${safePhone}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-directory-action" data-action="chat" style="background: var(--primary); color: white;">
+                    <i class="fas fa-comment"></i>
+                </button>
+                <button class="btn-directory-action" data-action="call" style="background: #25d366; color: white;">
+                    <i class="fas fa-phone"></i>
+                </button>
+            </div>
+        `;
+
+        item.querySelector('[data-action="chat"]').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            openChatWith(user);
+        });
+
+        item.querySelector('[data-action="call"]').addEventListener('click', () => {
+            directoryModal.classList.remove('active');
+            const fullUser = allUsers.find(u => u.uid === user.uid) || user;
+            startCall(false, false, fullUser);
+        });
+
+        directoryList.appendChild(item);
+    });
+}
+
+// --- WhatsApp Features (v2.17) ---
+const emojiBtn = document.getElementById('emoji-btn');
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+let emojiPicker = null;
+
+// Search contacts
+const contactSearchInput = document.getElementById('contact-search-input');
+if (contactSearchInput) {
+    contactSearchInput.addEventListener('input', (e) => {
+        renderContacts(e.target.value.toLowerCase());
+    });
+}
+
+if (emojiBtn) {
+    emojiBtn.addEventListener('click', () => {
+        if (emojiPicker) {
+            emojiPicker.remove();
+            emojiPicker = null;
+            return;
+        }
+
+        emojiPicker = document.createElement('div');
+        emojiPicker.className = 'emoji-picker';
+
+        const emojis = ["😀", "😂", "🥰", "😍", "😎", "🤔", "😜", "😇", "🥳", "😭", "👍", "❤️", "🔥", "✨", "🙌", "🙏", "🚀", "🎉"];
+
+        emojis.forEach(emoji => {
+            const span = document.createElement('span');
+            span.className = 'emoji-item';
+            span.textContent = emoji;
+            span.onclick = () => {
+                messageInput.value += emoji;
+                messageInput.focus();
+                // Trigger input event to show send button if needed
+                messageInput.dispatchEvent(new Event('input'));
+            };
+            emojiPicker.appendChild(span);
+        });
+
+        document.getElementById('chat-input-area').appendChild(emojiPicker);
+    });
+}
+
+// Close emoji picker when clicking outside
+document.addEventListener('click', (e) => {
+    if (emojiPicker && !emojiPicker.contains(e.target) && e.target !== emojiBtn) {
+        emojiPicker.remove();
+        emojiPicker = null;
+    }
+});
+
+// --- Attachment Logic ---
+if (attachBtn) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+}
+if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            alert("El archivo es demasiado grande (máx 5MB)");
+            return;
+        }
+
+        const fileName = `${Date.now()}_${file.name}`;
+        const storageRef = storage.ref().child(`chat_files/${fileName}`);
+
+        try {
+            const snapshot = await storageRef.put(file);
+            const url = await snapshot.ref.getDownloadURL();
+            await sendMessage(url, file.type.startsWith('image/') ? 'image' : 'file');
+        } catch (err) {
+            console.error("Error subiendo archivo:", err);
+            alert("Error al subir el archivo.");
+        }
+    });
+}
+
+// --- Alias Logic ---
+const aliasModal = document.getElementById('alias-modal');
+const aliasInput = document.getElementById('alias-input');
+const btnSaveAlias = document.getElementById('btn-save-alias');
+const btnEditAlias = document.getElementById('btn-edit-alias');
+const closeAliasModal = document.getElementById('close-alias-modal');
+
+btnEditAlias.addEventListener('click', () => {
+    aliasInput.value = currentUserData.alias || '';
+    aliasModal.classList.add('active');
+    setTimeout(() => aliasInput.focus(), 100);
+});
+
+closeAliasModal.addEventListener('click', () => aliasModal.classList.remove('active'));
+
+aliasModal.addEventListener('click', (e) => {
+    if (e.target === aliasModal) aliasModal.classList.remove('active');
+});
+
+btnSaveAlias.addEventListener('click', async () => {
+    const alias = aliasInput.value.trim();
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({ alias });
+        currentUserData.alias = alias;
+        showChatScreen(); // Actualiza el nombre en el sidebar
+        aliasModal.classList.remove('active');
+    } catch (e) {
+        console.error("Error guardando alias:", e);
+        alert("Error al guardar el alias. Inténtalo de nuevo.");
+    }
+});
+
 // --- Admin Panel Logic ---
 btnAdminPanel.addEventListener('click', () => {
     adminModal.classList.add('active');
@@ -51,111 +678,1375 @@ function renderAdminUserList() {
             actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary);" title="Editar"></i>`;
         }
 
-        // Cambiar rol: solo super_admin
-        if (isSuperAdmin && !targetIsSuperAdmin) {
-            actions += `<i class="fas fa-user-shield" onclick="changeUserRole('${user.uid}')" style="color: var(--primary);" title="Cambiar rol"></i>`;
+        // Encender/Apagar: solo super_admin, no puede apagarse a sí mismo ni a otros super_admin
+        if (isSuperAdmin && !isSelf && !targetIsSuperAdmin) {
+            const powerColor = isDisabled ? '#22c55e' : '#f43f5e';
+            const powerIcon = isDisabled ? 'fa-toggle-on' : 'fa-toggle-off';
+            const powerTitle = isDisabled ? 'Activar usuario' : 'Desactivar usuario';
+            actions += `<i class="fas ${powerIcon}" onclick="toggleUserDisabled('${user.uid}', ${isDisabled})" style="color: ${powerColor}; font-size: 20px;" title="${powerTitle}"></i>`;
         }
 
-        // Banear / desbanear: solo super_admin
-        if (isSuperAdmin && !targetIsSuperAdmin) {
-            if (isDisabled) {
-                actions += `<i class="fas fa-unlock" onclick="toggleUserDisabled('${user.uid}', false)" style="color: var(--primary);" title="Desactivar"></i>`;
-            } else {
-                actions += `<i class="fas fa-ban" onclick="toggleUserDisabled('${user.uid}', true)" style="color: var(--error);" title="Desactivar"></i>`;
-            }
-        }
-
-        // Borrar: solo super_admin puede borrar a otros (no a sí mismo)
+        // Borrar y resetear strikes: solo super_admin, no puede borrarse a sí mismo
         if (isSuperAdmin && !isSelf) {
-            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: var(--error);" title="Eliminar"></i>`;
+            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: #f43f5e;" title="Borrar"></i>`;
+            if (user.strikes > 0 || user.banUntil) {
+                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981;" title="Resetear Faltas"></i>`;
+            }
         }
 
         actions += `</div>`;
 
+        const disabledBadge = isDisabled ? `<span class="role-badge" style="background:#f43f5e;">desactivado</span>` : '';
         item.innerHTML = `
-            <span>${user.email}</span>
-            <span class="${roleClass} role-badge">${user.role}</span>
+            <div>
+                <strong>${user.name}</strong> <span style="font-size:12px;color:var(--text-secondary)">(${user.email})</span>
+                <span class="role-badge ${roleClass}">${user.role}</span>
+                ${disabledBadge}
+            </div>
             ${actions}
         `;
+        if (isDisabled) item.style.opacity = '0.5';
         adminUserList.appendChild(item);
     });
 }
 
-// --- Funciones de Admin (editar, cambiar rol, banear, eliminar) ---
-async function startEditUser(uid) {
-    const user = allUsers.find(u => u.uid === uid) || currentUserData;
-    if (!user) return;
-    editingUserId = uid;
-    adminFormTitle.textContent = "Editar Usuario";
-    adminFormSubmit.textContent = "Actualizar Usuario";
-    adminFormCancel.style.display = "block";
-
-    document.getElementById('new-user-name').value = user.name || '';
-    document.getElementById('new-user-email').value = user.email || '';
-    document.getElementById('new-user-email').disabled = true; // No cambiar email
-    passwordContainer.style.display = "none"; // No cambiar contraseña aquí
-    document.getElementById('new-user-role').value = user.role || 'usuario';
+// --- Chat Listeners ---
+function setupUsersListener() {
+    unsubscribeUsers = db.collection("users").onSnapshot((snapshot) => {
+        allUsers = [];
+        snapshot.forEach(doc => {
+            if (doc.id !== auth.currentUser.uid) {
+                allUsers.push({ uid: doc.id, ...doc.data() });
+            } else {
+                currentUserData = { uid: doc.id, ...doc.data() };
+            }
+        });
+        renderContacts();
+        setupGroupsListener(); // Refresh groups too
+        if (activeChatUser && !activeChatUser.isGroup) {
+            const updatedActive = allUsers.find(u => u.uid === activeChatUser.uid);
+            if (updatedActive) {
+                activeChatUser = updatedActive;
+                updateHeaderStatus();
+            }
+        }
+        if (adminModal.classList.contains('active')) renderAdminUserList();
+    });
 }
 
-adminCreateForm.addEventListener('submit', async e => {
+function setupGroupsListener() {
+    if (unsubscribeGroups) unsubscribeGroups();
+    unsubscribeGroups = db.collection("groups")
+        .where("members", "array-contains", auth.currentUser.uid)
+        .onSnapshot((snapshot) => {
+            allGroups = [];
+            snapshot.forEach(doc => {
+                allGroups.push({ uid: doc.id, ...doc.data(), isGroup: true });
+            });
+            renderContacts();
+            if (activeChatUser && activeChatUser.isGroup) {
+                const updatedActive = allGroups.find(g => g.uid === activeChatUser.uid);
+                if (updatedActive) {
+                    activeChatUser = updatedActive;
+                    updateHeaderStatus();
+                }
+            }
+        });
+}
+
+// --- UI Helpers ---
+function updateHeaderStatus() {
+    if (!activeChatUser) return;
+
+    if (activeChatUser.isGroup) {
+        chatStatus.textContent = `${activeChatUser.members.length} miembros`;
+        chatStatus.classList.remove('online');
+        return;
+    }
+
+    if (activeChatUser.status === "online") {
+        chatStatus.innerHTML = `<span class="status-dot"></span> en línea`;
+        chatStatus.classList.add('online');
+    } else {
+        chatStatus.classList.remove('online');
+        if (activeChatUser.lastSeen) {
+            const date = activeChatUser.lastSeen.toDate();
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            let timeStr;
+            if (diffMins < 1) {
+                timeStr = 'hace un momento';
+            } else {
+                const hh = date.getHours().toString().padStart(2, '0');
+                const mm = date.getMinutes().toString().padStart(2, '0');
+                const isToday = date.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = date.toDateString() === yesterday.toDateString();
+
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${date.getDate()}/${date.getMonth() + 1} a las ${hh}:${mm}`;
+            }
+            chatStatus.textContent = `última vez ${timeStr}`;
+        } else {
+            chatStatus.textContent = 'desconectado';
+        }
+    }
+}
+
+function renderContacts(filter = '') {
+    contactList.innerHTML = '';
+
+    // Merge Users and Groups
+    let combined = [...allGroups, ...allUsers];
+
+    // Filter by name (only show if filter is provided, or if they are pinned)
+    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
+
+    // Only keep those matching filter, OR those that are pinned
+    combined = combined.filter(u => {
+        const isPinned = pinnedIds.includes(u.uid);
+        if (isPinned) return true; // always show pinned
+
+        // If there's a search filter, show matches
+        if (filter) {
+            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
+            return nameToSearch.toLowerCase().includes(filter);
+        }
+
+        // WhatsApp-like: show if it has at least one message (recent conversations)
+        return getLatestTimestamp(u) > 0;
+    });
+
+    // Helper to get the latest message timestamp for an entity
+    function getLatestTimestamp(entity) {
+        if (!auth.currentUser) return 0;
+        const isGroup = entity.isGroup;
+        const chatNotes = allMessages.filter(m =>
+            isGroup ? (m.groupId === entity.uid) : ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) || (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
+        );
+        if (chatNotes.length > 0) {
+            const last = chatNotes[chatNotes.length - 1];
+            return typeof last.timestamp === 'function' ? last.timestamp.toMillis() : Date.now();
+        }
+        return 0;
+    }
+
+    // Sorting Logic: Pinned first, then by last message time
+    combined.sort((a, b) => {
+        const aPinned = pinnedIds.includes(a.uid);
+        const bPinned = pinnedIds.includes(b.uid);
+
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+
+        // If both pinned or both unpinned, sort by newest message (descending)
+        return getLatestTimestamp(b) - getLatestTimestamp(a);
+    });
+
+    combined.forEach(entity => {
+        const isGroup = entity.isGroup;
+        const isPinned = pinnedIds.includes(entity.uid);
+        const isSelf = entity.uid === auth.currentUser.uid;
+
+        const item = document.createElement('div');
+        item.className = `contact-item${isPinned ? ' pinned' : ''}`;
+        if (activeChatUser && activeChatUser.uid === entity.uid) item.classList.add('active');
+
+        const avatar = isGroup ?
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
+
+        const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
+        const roleClass = `role-${entity.role}`;
+        const entityDisplayName = escapeHtml(isGroup ? entity.name : getDisplayName(entity));
+        const safeRole = escapeHtml(entity.role || '');
+
+        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${safeRole}</span>` : '';
+
+        const unreadCount = getUnreadCount(entity);
+        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
+
+        item.innerHTML = `
+            ${indicator}
+            <img src="${avatar}">
+            <div class="contact-info">
+                <div class="contact-name-time">
+                    <span class="contact-name">${entityDisplayName} ${badge}</span>
+                    <div style="display: flex; align-items: center;">
+                        <span class="contact-time"></span>
+                        <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
+                    </div>
+                </div>
+                <div class="contact-message-row">
+                    <div class="contact-message"></div>
+                    ${unreadBadge}
+                </div>
+            </div>
+        `;
+
+        // Update last message preview and time
+        const lastMsg = getLastMessage(entity);
+        const msgPreview = item.querySelector('.contact-message');
+        const timeEl = item.querySelector('.contact-time');
+        if (lastMsg) {
+            msgPreview.textContent = formatMessagePreview(lastMsg);
+            timeEl.textContent = formatTimestamp(lastMsg.timestamp);
+        }
+
+        // Pin toggle
+        const pinBtn = item.querySelector('.btn-pin');
+        pinBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePin(entity.uid);
+        });
+
+        item.addEventListener('click', () => {
+            activeChatUser = entity;
+            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            openChatWith(entity);
+        });
+
+        contactList.appendChild(item);
+    });
+}
+
+// Helper functions used above
+function getDisplayName(user) {
+    return (user && user.alias && user.alias.trim()) ? user.alias.trim() : user.name;
+}
+
+function getLastMessage(entity) {
+    const uid = auth.currentUser.uid;
+    if (entity.isGroup) {
+        const msgs = allMessages.filter(m => m.groupId === entity.uid);
+        return msgs.length ? msgs[msgs.length - 1] : null;
+    } else {
+        const msgs = allMessages.filter(m =>
+            (m.senderId === uid && m.receiverId === entity.uid) ||
+            (m.senderId === entity.uid && m.receiverId === uid)
+        );
+        return msgs.length ? msgs[msgs.length - 1] : null;
+    }
+}
+
+function formatMessagePreview(msg) {
+    if (!msg) return '';
+    if (msg.type === 'call') return '📞 Llamada';
+    if (msg.type === 'image') return '📷 Imagen';
+    if (msg.type === 'file') return '📎 Archivo';
+    if (msg.type === 'audio') return '🎧 Audio';
+    return msg.text.length > 30 ? msg.text.substring(0, 30) + '...' : msg.text;
+}
+
+function formatTimestamp(ts) {
+    if (!ts) return '';
+    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    const now = new Date();
+    const diff = now - date;
+    const diffMins = Math.floor(diff / 60000);
+    if (diffMins < 1) return 'Ahora';
+    if (diffMins < 60) return `${diffMins}m`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d`;
+}
+
+// --- Unread / Read Logic ---
+function markMessagesAsRead(entity) {
+    if (!auth.currentUser || !entity) return;
+    const uid = auth.currentUser.uid;
+
+    const unread = allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid && m.senderId !== uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        return isForMe;
+    });
+
+    if (unread.length === 0) return;
+
+    // Marcar en el Set local INMEDIATAMENTE — nunca se borra aunque Firestore tarde
+    unread.forEach(m => readMessageIds.add(m.id));
+    renderContacts(); // Badge desaparece al instante
+
+    // Persistir en Firestore en segundo plano
+    const batch = db.batch();
+    unread.forEach(m => {
+        batch.update(db.collection("messages").doc(m.id), {
+            readBy: firebase.firestore.FieldValue.arrayUnion(uid)
+        });
+    });
+    batch.commit().catch(e => console.error("Error marking as read:", e));
+}
+
+function getUnreadCount(entity) {
+    if (!auth.currentUser) return 0;
+    const uid = auth.currentUser.uid;
+
+    return allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        if (m.senderId === uid) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        // Considerar leídos los que ya tienen nuestro uid en readBy (de sesiones anteriores)
+        const alreadyRead = m.readBy && m.readBy.includes(uid);
+        return isForMe && !alreadyRead;
+    }).length;
+}
+
+// --- Messaging ---
+function renderMessages() {
+    Array.from(chatMessages.children).forEach(c => { if (c.id !== 'welcome-message') c.remove(); });
+    if (!activeChatUser) return;
+
+    const messagesToShow = activeChatUser.isGroup
+        ? allMessages.filter(m => m.groupId === activeChatUser.uid)
+        : allMessages.filter(m => (m.senderId === auth.currentUser.uid && m.receiverId === activeChatUser.uid) || (m.senderId === activeChatUser.uid && m.receiverId === auth.currentUser.uid));
+
+    messagesToShow.forEach(msg => {
+        const el = document.createElement('div');
+        const isMine = msg.senderId === auth.currentUser.uid;
+        el.className = `message ${isMine ? 'sent' : 'received'}`;
+        el.dataset.id = msg.id;
+
+        // Mensaje borrado
+        if (msg.isDeleted) {
+            el.innerHTML = `<span class="deleted-msg"><i class="fas fa-ban"></i> Este mensaje fue eliminado</span>`;
+            chatMessages.appendChild(el);
+            return;
+        }
+
+        let senderName = "";
+        if (activeChatUser.isGroup && !isMine) {
+            const sender = allUsers.find(u => u.uid === msg.senderId);
+            const safeName = escapeHtml(sender ? sender.name : 'Unknown');
+            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${safeName}</div>`;
+        }
+
+        // Reply preview
+        let replyHtml = '';
+        if (msg.replyTo) {
+            const safeReplySender = escapeHtml(msg.replyTo.senderName);
+            const safeReplyText = escapeHtml(msg.replyTo.text);
+            replyHtml = `
+                <div class="reply-preview">
+                    <span class="reply-sender">${safeReplySender}</span>
+                    <div class="reply-text">${safeReplyText}</div>
+                </div>`;
+        }
+
+        // Edited tag
+        const editedHtml = msg.isEdited ? `<span class="edited-tag">(editado)</span>` : '';
+
+        // Options menu (solo para mis mensajes)
+        let optionsHtml = '';
+        if (isMine && msg.type === 'text') {
+            optionsHtml = `
+                <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+                <div class="options-menu" id="options-${msg.id}">
+                    <div class="options-menu-item" onclick="startEditingMessage('${msg.id}')"><i class="fas fa-pen"></i> Editar</div>
+                    <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Borrar para todos</div>
+                </div>`;
+        } else if (isMine) {
+            optionsHtml = `
+                <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+                <div class="options-menu" id="options-${msg.id}">
+                    <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Borrar para todos</div>
+                </div>`;
+        }
+
+        // Render según tipo
+        if (msg.type === 'call') {
+            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${escapeHtml(msg.text)}<span class="time">${msg.time}</span>`;
+            el.style.backgroundColor = 'var(--primary)';
+            el.style.cursor = 'pointer';
+            el.onclick = () => {
+                const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
+                startCall(msg.audioOnly || false, true, caller);
+            };
+        } else if (msg.type === 'audio') {
+            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
+            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'image') {
+            const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
+            el.innerHTML = `${replyHtml}${senderName}<img src="${escapeHtml(safeImgUrl)}" style="max-width:100%; border-radius:10px; cursor:pointer;" onclick="window.open('${escapeHtml(safeImgUrl)}', '_blank')"><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'file') {
+            const safeFileUrl = msg.text.startsWith('https://') ? msg.text : '';
+            el.innerHTML = `${replyHtml}${senderName}<div class="file-attachment"><i class="fas fa-file-alt"></i> <a href="${escapeHtml(safeFileUrl)}" target="_blank" style="color:white; text-decoration:underline;">Ver archivo adjunto</a></div><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else {
+            const safeText = escapeHtml(msg.text);
+            el.innerHTML = `${replyHtml}${senderName}${safeText}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
+        }
+
+        // Swipe to reply (touch)
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        el.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
+        el.addEventListener('touchend', e => { touchEndX = e.changedTouches[0].screenX; handleSwipeReply(); }, { passive: true });
+
+        function handleSwipeReply() {
+            // Swipe right (> 40px)
+            if (touchEndX - touchStartX > 40) {
+                const userSource = isMine ? 'Tú' : (activeChatUser.isGroup ? (allUsers.find(u => u.uid === msg.senderId)?.name || 'Unknown') : activeChatUser.name);
+                let txt = msg.text;
+                if (msg.type === 'audio') txt = '🎵 Nota de voz';
+                else if (msg.type === 'call') txt = '📞 Llamada';
+                prepareReply(msg.id, userSource, txt);
+            }
+        }
+
+        chatMessages.appendChild(el);
+    });
+    setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
+}
+
+function toggleMessageOptions(msgId, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.options-menu').forEach(m => { if (m.id !== `options-${msgId}`) m.classList.remove('active'); });
+    const menu = document.getElementById(`options-${msgId}`);
+    if (menu) menu.classList.toggle('active');
+}
+
+function deleteMessage(msgId) {
+    if (!confirm("¿Deseas eliminar este mensaje para todos?")) return;
+    db.collection("messages").doc(msgId).update({
+        isDeleted: true,
+        text: ""
+    }).catch(err => console.error("Error borrando mensaje:", err));
+}
+
+function startEditingMessage(msgId) {
+    const msg = allMessages.find(m => m.id === msgId);
+    if (!msg) return;
+    editingMessageId = msgId;
+    messageInput.value = msg.text;
+    messageInput.focus();
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = "Editando mensaje...";
+    document.getElementById('reply-text-preview').textContent = msg.text;
+    replyBox.classList.add('active');
+}
+
+// Reply handling
+function prepareReply(msgId, senderName, text) {
+    editingMessageId = null; // Cannot edit and reply at the same time
+    replyingToMessage = { id: msgId, senderName, text };
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = `Responder a ${senderName}`;
+    document.getElementById('reply-text-preview').textContent = text;
+    replyBox.classList.add('active');
+    messageInput.focus();
+}
+
+const btnCloseReply = document.getElementById('btn-close-reply');
+if (btnCloseReply) {
+    btnCloseReply.addEventListener('click', cancelReplyMode);
+}
+
+function cancelReplyMode() {
+    replyingToMessage = null;
+    if (editingMessageId) {
+        editingMessageId = null;
+        messageInput.value = '';
+    }
+    const replyBox = document.getElementById('reply-box-input');
+    if (replyBox) replyBox.classList.remove('active');
+}
+
+// --- Send Message ---
+async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
+    const text = overrideText || messageInput.value.trim();
+    if (!text || !activeChatUser) return;
+
+    // Profanity Check (solo para texto)
+    if (type === 'text' && hasProfanity(text)) {
+        applyStrike();
+        return; // Stop message from being sent
+    }
+
+    // Si estamos editando un mensaje existente y es de tipo texto
+    if (editingMessageId && type === 'text') {
+        try {
+            await db.collection("messages").doc(editingMessageId).update({
+                text: text,
+                isEdited: true
+            });
+            editingMessageId = null; // Reset
+            cancelReplyMode(); // Limpiar UI por si acaso
+        } catch (e) {
+            console.error("Error al editar mensaje:", e);
+        }
+        return;
+    }
+
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    // Preparar el mensaje nuevo
+    const messageData = {
+        senderId: auth.currentUser.uid,
+        text: text,
+        type: type,
+        audioOnly: audioOnly,
+        time: time,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        readBy: [auth.currentUser.uid] // Sender has already "read" it
+    };
+
+    // Agregar contexto de respuesta si existe
+    if (replyingToMessage) {
+        messageData.replyTo = replyingToMessage;
+        cancelReplyMode(); // Reset visual state
+    }
+
+    if (activeChatUser.isGroup) {
+        messageData.groupId = activeChatUser.uid;
+    } else {
+        messageData.receiverId = activeChatUser.uid;
+    }
+
+    try {
+        console.log("Intentando enviar mensaje:", messageData);
+        await db.collection("messages").add(messageData);
+        console.log("Mensaje enviado con éxito");
+
+        // Clear input only on success
+        if (!overrideText) {
+            messageInput.value = '';
+            messageInput.dispatchEvent(new Event('input'));
+        }
+    } catch (e) {
+        console.error("Error completo al enviar mensaje:", e);
+        // Mostrar error detallado para facilitar el diagnóstico
+        let errorMsg = "Error al enviar el mensaje.\n";
+        if (e.code === 'permission-denied') {
+            errorMsg += "❌ Sin permisos en Firestore. Comprueba que tu sesión sigue activa y que las reglas de seguridad permiten escribir mensajes.";
+        } else if (e.code === 'unauthenticated') {
+            errorMsg += "❌ No estás autenticado. Por favor, cierra sesión y vuelve a entrar.";
+        } else if (e.code === 'unavailable') {
+            errorMsg += "❌ Sin conexión a internet. Comprueba tu red e inténtalo de nuevo.";
+        } else {
+            errorMsg += "Código: " + (e.code || 'desconocido') + "\nDetalle: " + e.message;
+        }
+        alert(errorMsg);
+    }
+}
+
+// Global click to close options menu
+document.addEventListener('click', () => {
+    document.querySelectorAll('.options-menu').forEach(m => m.classList.remove('active'));
+});
+
+// UI helpers para responder/editar/borrar
+window.toggleMessageOptions = function(msgId, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.options-menu').forEach(m => {
+        if (m.id !== `options-${msgId}`) m.classList.remove('active');
+    });
+    const menu = document.getElementById(`options-${msgId}`);
+    if (menu) menu.classList.toggle('active');
+};
+
+window.deleteMessage = async function(msgId) {
+    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
+    try {
+        await db.collection("messages").doc(msgId).update({
+            isDeleted: true,
+            text: ""
+        });
+    } catch (e) {
+        console.error("Error al borrar mensaje:", e);
+    }
+};
+
+window.toggleUserDisabled = async (uid, currentlyDisabled) => {
+    const action = currentlyDisabled ? 'activar' : 'desactivar';
+    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            disabled: !currentlyDisabled
+        });
+        renderAdminUserList();
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.resetStrikes = async (uid) => {
+    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            strikes: 0,
+            banUntil: null
+        });
+        alert("Faltas reseteadas con éxito.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.startEditUser = (uid) => {
+    const user = [currentUserData, ...allUsers].find(u => u.uid === uid);
+    if (!user) return;
+
+    editingUserId = uid;
+    adminFormTitle.textContent = "Editando: " + user.name;
+    adminFormSubmit.textContent = "Guardar Cambios";
+    adminFormCancel.style.display = "block";
+
+    document.getElementById('new-user-name').value = user.name;
+    document.getElementById('new-user-email').value = user.email;
+    document.getElementById('new-user-email').disabled = true;
+    document.getElementById('new-user-role').value = user.role;
+
+    // V2 FIX: Never display or load stored passwords.
+    // Passwords are managed exclusively by Firebase Auth.
+    passwordContainer.style.display = "none";
+    newUserPassword.required = false;
+    newUserPassword.value = "";
+};
+
+window.deleteUser = async (uid) => {
+    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
+    try {
+        // 1. Delete Firestore document
+        await db.collection("users").doc(uid).delete();
+
+        // 2. Attempt to delete from Firebase Auth via Cloud Function
+        // Requires a deployed Cloud Function named 'deleteAuthUser'
+        try {
+            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
+            if (deleteAuthUser) {
+                await deleteAuthUser({ uid });
+            } else {
+                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
+            }
+        } catch (fnErr) {
+            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
+        }
+
+        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+adminCreateForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('new-user-name').value.trim();
     const email = document.getElementById('new-user-email').value.trim();
-    const role = document.getElementById('new-user-role').value;
     const password = newUserPassword.value;
+    const role = document.getElementById('new-user-role').value;
 
     try {
         if (editingUserId) {
-            // UPDATE
-            await db.collection('users').doc(editingUserId).update({ name, role });
-            alert('Usuario actualizado.');
+            // V2 FIX: Only update name and role — never store or touch passwords.
+            const updateData = { name: name, role: role };
+            await db.collection("users").doc(editingUserId).update(updateData);
+            alert("Usuario actualizado");
         } else {
-            // CREATE
+            // V9 FIX: Use the primary auth instance. Save admin credentials
+            // to restore the session after creating the new user account.
+            const adminEmail = auth.currentUser.email;
+            const adminPasswordInput = prompt(
+                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
+            );
+            if (!adminPasswordInput) return;
+
+            // Create the new user (this signs us out of the admin session)
             const cred = await auth.createUserWithEmailAndPassword(email, password);
-            const uid = cred.user.uid;
-            const newUser = {
-                uid,
-                email,
-                name,
-                role,
-                status: 'offline',
-                strikes: 0,
-                disabled: false,
-                createdBy: auth.currentUser.uid,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            await db.collection('users').doc(uid).set(newUser);
-            alert('Usuario creado.');
+            const newUid = cred.user.uid;
+
+            // V2 FIX: Never store the password in Firestore.
+            await db.collection("users").doc(newUid).set({
+                uid: newUid,
+                email: email,
+                name: name,
+                role: role,
+                status: "offline",
+                phoneNumber: await generateUniquePhoneNumber(),
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Sign out the newly created user and restore the admin session
+            await auth.signOut();
+            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
+            alert("Usuario registrado: " + email);
         }
         resetAdminForm();
-        renderAdminUserList();
     } catch (err) {
-        console.error(err);
-        alert('Error en la operación de usuarios: ' + err.message);
+        console.error("Error completo en Admin Panel:", err);
+        if (err.code === 'auth/too-many-requests') {
+            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
+        } else {
+            alert("Error: " + err.message);
+        }
     }
 });
 
-async function changeUserRole(uid) {
-    const newRole = prompt('Introduce el nuevo rol (usuario, admin, super_admin):');
-    if (!['usuario', 'admin', 'super_admin'].includes(newRole)) {
-        alert('Rol inválido.');
+function togglePin(entityId) {
+    if (!currentUserData) return;
+
+    let pinned = currentUserData.pinnedChats || [];
+    if (pinned.includes(entityId)) {
+        pinned = pinned.filter(id => id !== entityId);
+    } else {
+        pinned.push(entityId);
+    }
+
+    db.collection("users").doc(auth.currentUser.uid).update({ pinnedChats: pinned })
+        .catch(e => console.error("Error toggling pin:", e));
+}
+
+// --- Call Logic ---
+btnVideoCall.addEventListener('click', () => startCall(false));
+btnVoiceCall.addEventListener('click', () => startCall(true));
+
+function startCall(audioOnly, isReceiver = false, remoteUser = null) {
+    const targetUser = isReceiver ? remoteUser : activeChatUser;
+    if (!targetUser) return;
+
+    // Verify Jitsi library availability
+    if (typeof JitsiMeetExternalAPI === 'undefined') {
+        alert("⚠️ Error: La librería de SEK-Time no se ha cargado correctamente. Por favor, recarga la página.");
+        console.error("JitsiMeetExternalAPI is not defined");
         return;
     }
-    await db.collection('users').doc(uid).update({ role: newRole });
-    renderAdminUserList();
+
+    callModal.classList.add('active');
+    incomingCallOverlay.classList.remove('active');
+    jitsiContainer.innerHTML = ''; // Clear previous calls
+
+    // Show loader
+    const loader = document.getElementById('jitsi-loader');
+    if (loader) loader.classList.remove('jitsi-hidden');
+
+    // Multi-stage safety nets for the loader
+    const loaderTimeoutFast = setTimeout(() => {
+        if (loader && !loader.classList.contains('jitsi-hidden')) {
+            console.warn("Jitsi: Connection taking longer than expected...");
+        }
+    }, 5000);
+
+    const loaderTimeoutFinal = setTimeout(() => {
+        if (loader) loader.classList.add('jitsi-hidden');
+        console.error("Jitsi: Connection timeout, hiding loader");
+    }, 15000);
+
+    try {
+        const domain = "meet.jit.si";
+        const ids = [auth.currentUser.uid, targetUser.uid].sort();
+        const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
+
+        const options = {
+            roomName: roomName,
+            width: '100%',
+            height: '100%',
+            parentNode: jitsiContainer,
+            userInfo: {
+                displayName: currentUserData.name
+            },
+            configOverwrite: {
+                prejoinPageEnabled: false,
+                prejoinConfig: { enabled: false },
+                startWithAudioMuted: false,
+                startWithVideoMuted: audioOnly,
+                disableDeepLinking: true,
+                enableWelcomePage: false,
+                enableClosePage: false
+            },
+            interfaceConfigOverwrite: {
+                SHOW_JITSI_WATERMARK: false,
+                DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
+                TOOLBAR_BUTTONS: [
+                    'microphone', 'camera', 'desktop', 'fullscreen',
+                    'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
+                ]
+            }
+        };
+
+        jitsiApi = new JitsiMeetExternalAPI(domain, options);
+
+        jitsiApi.addEventListeners({
+            readyToClose: endCall,
+            videoConferenceLeft: endCall,
+            videoConferenceJoined: () => {
+                console.log("SEK-Time: Conexión establecida correctamente");
+                clearTimeout(loaderTimeoutFast);
+                clearTimeout(loaderTimeoutFinal);
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            participantJoined: (event) => {
+                console.log("SEK-Time: Participante unido:", event.displayName);
+            },
+            cameraError: (error) => {
+                console.error("SEK-Time: Error de cámara:", error);
+                alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            micError: (error) => {
+                console.error("SEK-Time: Error de micrófono:", error);
+            }
+        });
+
+        if (!isReceiver) {
+            const type = audioOnly ? "Llamada de voz" : "Videollamada";
+            sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
+        }
+    } catch (error) {
+        console.error("SEK-Time: Error crítico iniciando llamada:", error);
+        alert("Hubo un error al iniciar la llamada. Por favor, inténtalo de nuevo.");
+        clearTimeout(loaderTimeoutFast);
+        clearTimeout(loaderTimeoutFinal);
+        if (loader) loader.classList.add('jitsi-hidden');
+        endCall();
+    }
 }
 
-async function toggleUserDisabled(uid, disable) {
-    await db.collection('users').doc(uid).update({ disabled: disable });
-    renderAdminUserList();
+function endCall() {
+    if (jitsiApi) {
+        jitsiApi.dispose();
+        jitsiApi = null;
+    }
+    jitsiContainer.innerHTML = '';
+    callModal.classList.remove('active');
 }
 
-async function deleteUser(uid) {
-    if (!confirm('¿Estás seguro de eliminar este usuario?')) return;
-    await db.collection('users').doc(uid).delete();
-    renderAdminUserList();
+btnEndCall.addEventListener('click', endCall);
+
+// Incoming Call UI
+function handleIncomingCall(msg) {
+    if (processedCallIds.has(msg.id)) return;
+    processedCallIds.add(msg.id);
+
+    const caller = allUsers.find(u => u.uid === msg.senderId);
+    if (!caller) return;
+
+    const callerDisplayName = getDisplayName(caller);
+    callerName.textContent = callerDisplayName;
+    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(callerDisplayName)}&background=random&color=fff&size=200`;
+    callTypeText.textContent = msg.audioOnly ? "Llamada de voz entrante..." : "Videollamada entrante...";
+
+    incomingCallOverlay.classList.add('active');
+
+    // Button handlers for this specific call
+    btnAcceptCall.onclick = () => {
+        startCall(msg.audioOnly || false, true, caller);
+    };
+
+    btnDeclineCall.onclick = () => {
+        incomingCallOverlay.classList.remove('active');
+    };
+
+    // Auto-close after 30 seconds if not answered
+    setTimeout(() => {
+        incomingCallOverlay.classList.remove('active');
+    }, 30000);
 }
 
-// --- Final del archivo ----------------------------------------------------
-// (Todas las funciones de manejo de llamadas, mensajes, UI, etc. ya estaban
-// presentes en las secciones anteriores del archivo.)
+// --- Profanity & Strike System ---
+const PROFANITY_LIST = ["mierda", "puta", "puto", "gilipollas", "cabron", "cabrón", "follar", "hijo de puta", "joder", "coño", "maricon", "maricón", "zorra", "bollera", "pendejo", "idiota", "estupido", "estúpido"];
+
+function hasProfanity(text) {
+    const lowerText = text.toLowerCase();
+    return PROFANITY_LIST.some(word => lowerText.includes(word));
+}
+
+const STRIKE_BANS = {
+    1: 1 * 60 * 60 * 1000,           // 1 hora
+    2: 5 * 60 * 60 * 1000,           // 5 horas
+    3: 24 * 60 * 60 * 1000,          // 1 día
+    4: 15 * 24 * 60 * 60 * 1000,     // 15 días
+    5: 30 * 24 * 60 * 60 * 1000,     // 1 mes
+    6: "permanent"                    // Permanente
+};
+
+async function applyStrike() {
+    if (!auth.currentUser) return;
+
+    const userRef = db.collection("users").doc(auth.currentUser.uid);
+    const doc = await userRef.get();
+    const data = doc.data();
+
+    const currentStrikes = (data.strikes || 0) + 1;
+    let banDuration = STRIKE_BANS[currentStrikes] || STRIKE_BANS[5];
+    let banUntil = null;
+
+    if (banDuration === "permanent" || currentStrikes >= 6) {
+        banUntil = "permanent";
+    } else {
+        banUntil = firebase.firestore.Timestamp.fromMillis(Date.now() + banDuration);
+    }
+
+    await userRef.update({
+        strikes: currentStrikes,
+        banUntil: banUntil,
+        status: "offline"
+    });
+
+    alert(`⚠️ SANCIÓN POR LENGUAJE INAPROPIADO
+
+Has acumulado ${currentStrikes} falta(s).
+Tu cuenta ha sido suspendida temporalmente.`);
+    location.reload(); // Force check
+}
+
+function checkBanStatus(data) {
+    if (!data.banUntil) return false;
+
+    if (data.banUntil === "permanent") {
+        showBanScreen("Sanción Permanente", "Has sido expulsado definitivamente por acumular 6 faltas. Contacta con un SuperAdmin para solicitar el desbloqueo.");
+        return true;
+    }
+
+    const now = Date.now();
+    const banDate = data.banUntil.toMillis();
+
+    if (now < banDate) {
+        const timeLeft = banDate - now;
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const days = Math.floor(hours / 24);
+
+        let msg = "Tu cuenta está suspendida. Quedan ";
+        if (days > 0) msg += `${days} días y ${hours % 24} horas.`;
+        else if (hours > 0) msg += `${hours} horas y ${minutes} minutos.`;
+        else msg += `${minutes} minutos.`;
+
+        showBanScreen("Cuenta Suspendida", msg);
+        return true;
+    }
+    return false;
+}
+
+function showBanScreen(title, message) {
+    isUserBanned = true;
+    document.body.innerHTML = `
+        <div style="background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: 'Inter', sans-serif; text-align: center; padding: 20px;">
+            <div style="max-width: 500px; background: #1e293b; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 0 50px rgba(244, 63, 94, 0.2);">
+                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px;"></i>
+                <h1 style="font-size: 32px; margin-bottom: 20px;">${title}</h1>
+                <p style="color: #94a3b8; font-size: 18px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+                <button onclick="location.reload()" class="btn-login" style="width: 100%;">Reintentar conexión</button>
+            </div>
+        </div>
+    `;
+}
+
+// --- Auth States ---
+auth.onAuthStateChanged(async (user) => {
+    if (user) {
+        await handleUserLogin(user);
+    } else {
+        showLoginScreen();
+    }
+});
+
+async function handleUserLogin(user) {
+    const userDocRef = db.collection("users").doc(user.uid);
+    const doc = await userDocRef.get();
+
+    if (!doc.exists) {
+        const name = user.email.split('@')[0];
+        currentUserData = {
+            uid: user.uid,
+            email: user.email,
+            name: name,
+            role: "usuario",
+            status: "online",
+            pinnedChats: [],
+            phoneNumber: await generateUniquePhoneNumber(),
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await userDocRef.set(currentUserData);
+    } else {
+        currentUserData = { uid: user.uid, ...doc.data() };
+
+        // Assign phone number if missing (migration)
+        if (!currentUserData.phoneNumber) {
+            currentUserData.phoneNumber = await generateUniquePhoneNumber();
+            await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
+        }
+
+        // Check Disabled Status
+        if (currentUserData.disabled === true) {
+            showBanScreen("Cuenta Desactivada", "Tu cuenta ha sido desactivada por un administrador. Contacta con un SuperAdmin para solicitar el acceso.");
+            return;
+        }
+
+        // Check Ban Status
+        if (checkBanStatus(currentUserData)) {
+            return;
+        }
+
+        await updateUserStatus("online");
+    }
+
+    setupUsersListener();
+    setupMessagesListener();
+    showChatScreen();
+    startIdleMonitoring();
+    requestNotificationPermission();
+
+    // Update lastSeen every 10 minutes while active
+    setInterval(() => {
+        if (auth.currentUser && document.visibilityState === 'visible') {
+            updateUserStatus("online");
+        }
+    }, 10 * 60 * 1000);
+}
+
+// --- Inactivity Logic ---
+function startIdleMonitoring() {
+    stopIdleMonitoring(); // Reset if already running
+    resetIdleTimer();
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.addEventListener(evt, resetIdleTimer);
+    });
+}
+
+function stopIdleMonitoring() {
+    clearTimeout(idleTimeout);
+    clearTimeout(logoutTimeout);
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.removeEventListener(evt, resetIdleTimer);
+    });
+}
+
+function resetIdleTimer() {
+    if (idleModal.classList.contains('active')) return; // Don't reset if modal is showing
+
+    clearTimeout(idleTimeout);
+    idleTimeout = setTimeout(showIdleModal, IDLE_TIME_LIMIT);
+}
+
+function showIdleModal() {
+    idleModal.classList.add('active');
+    updateUserStatus("offline"); // Mark as away/offline in background
+
+    let secondsLeft = 120;
+    idleTimerDisplay.textContent = `2:00`;
+
+    clearInterval(window.logoutCountdown);
+    window.logoutCountdown = setInterval(() => {
+        secondsLeft--;
+        const mins = Math.floor(secondsLeft / 60);
+        const secs = secondsLeft % 60;
+        idleTimerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+        if (secondsLeft <= 0) {
+            clearInterval(window.logoutCountdown);
+            handleAutoLogout();
+        }
+    }, 1000);
+}
+
+async function handleAutoLogout() {
+    idleModal.classList.remove('active');
+    await updateUserStatus("offline");
+    auth.signOut();
+    alert("Sesión cerrada por inactividad.");
+}
+
+btnIdleConfirm.addEventListener('click', () => {
+    idleModal.classList.remove('active');
+    clearInterval(window.logoutCountdown);
+    updateUserStatus("online");
+    resetIdleTimer();
+});
+
+// --- Presence System ---
+async function updateUserStatus(status) {
+    if (!auth.currentUser) return;
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({
+            status: status,
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) {
+        console.error("Error updating status:", e);
+    }
+}
+
+// Handle Page Visibility (Online/Away)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        updateUserStatus("online");
+    } else {
+        // We set to offline or away when tab is hidden to be more accurate
+        updateUserStatus("offline");
+    }
+});
+
+// Handle Window Close
+window.addEventListener('beforeunload', (event) => {
+    if (auth.currentUser) {
+        // Use a synchronous-ish update or navigator.sendBeacon if needed,
+        // but for Firestore, a direct update usually works if not too many fields.
+        db.collection("users").doc(auth.currentUser.uid).update({
+            status: "offline",
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
+});
+
+function showLoginScreen() {
+    currentUserData = null;
+    activeChatUser = null;
+    if (unsubscribeMessages) unsubscribeMessages();
+    if (unsubscribeUsers) unsubscribeUsers();
+    if (unsubscribeGroups) unsubscribeGroups();
+    chatScreen.classList.remove('active');
+    loginScreen.classList.add('active');
+}
+
+// --- UI helpers para responder/editar/borrar ---
+window.toggleMessageOptions = function(msgId, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.options-menu').forEach(m => {
+        if (m.id !== `options-${msgId}`) m.classList.remove('active');
+    });
+    const menu = document.getElementById(`options-${msgId}`);
+    if (menu) menu.classList.toggle('active');
+};
+
+window.deleteMessage = async function(msgId) {
+    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
+    try {
+        await db.collection("messages").doc(msgId).update({
+            isDeleted: true,
+            text: ""
+        });
+    } catch (e) {
+        console.error("Error al borrar mensaje:", e);
+    }
+};
+
+window.toggleUserDisabled = async (uid, currentlyDisabled) => {
+    const action = currentlyDisabled ? 'activar' : 'desactivar';
+    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            disabled: !currentlyDisabled
+        });
+        renderAdminUserList();
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.resetStrikes = async (uid) => {
+    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            strikes: 0,
+            banUntil: null
+        });
+        alert("Faltas reseteadas con éxito.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.startEditUser = (uid) => {
+    const user = [currentUserData, ...allUsers].find(u => u.uid === uid);
+    if (!user) return;
+
+    editingUserId = uid;
+    adminFormTitle.textContent = "Editando: " + user.name;
+    adminFormSubmit.textContent = "Guardar Cambios";
+    adminFormCancel.style.display = "block";
+
+    document.getElementById('new-user-name').value = user.name;
+    document.getElementById('new-user-email').value = user.email;
+    document.getElementById('new-user-email').disabled = true;
+    document.getElementById('new-user-role').value = user.role;
+
+    // V2 FIX: Never display or load stored passwords.
+    // Passwords are managed exclusively by Firebase Auth.
+    passwordContainer.style.display = "none";
+    newUserPassword.required = false;
+    newUserPassword.value = "";
+};
+
+window.deleteUser = async (uid) => {
+    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
+    try {
+        // 1. Delete Firestore document
+        await db.collection("users").doc(uid).delete();
+
+        // 2. Attempt to delete from Firebase Auth via Cloud Function
+        // Requires a deployed Cloud Function named 'deleteAuthUser'
+        try {
+            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
+            if (deleteAuthUser) {
+                await deleteAuthUser({ uid });
+            } else {
+                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
+            }
+        } catch (fnErr) {
+            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
+        }
+
+        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+adminCreateForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('new-user-name').value.trim();
+    const email = document.getElementById('new-user-email').value.trim();
+    const password = newUserPassword.value;
+    const role = document.getElementById('new-user-role').value;
+
+    try {
+        if (editingUserId) {
+            // V2 FIX: Only update name and role — never store or touch passwords.
+            const updateData = { name: name, role: role };
+            await db.collection("users").doc(editingUserId).update(updateData);
+            alert("Usuario actualizado");
+        } else {
+            // V9 FIX: Use the primary auth instance. Save admin credentials
+            // to restore the session after creating the new user account.
+            const adminEmail = auth.currentUser.email;
+            const adminPasswordInput = prompt(
+                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
+            );
+            if (!adminPasswordInput) return;
+
+            // Create the new user (this signs us out of the admin session)
+            const cred = await auth.createUserWithEmailAndPassword(email, password);
+            const newUid = cred.user.uid;
+
+            // V2 FIX: Never store the password in Firestore.
+            await db.collection("users").doc(newUid).set({
+                uid: newUid,
+                email: email,
+                name: name,
+                role: role,
+                status: "offline",
+                phoneNumber: await generateUniquePhoneNumber(),
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Sign out the newly created user and restore the admin session
+            await auth.signOut();
+            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
+            alert("Usuario registrado: " + email);
+        }
+        resetAdminForm();
+    } catch (err) {
+        console.error("Error completo en Admin Panel:", err);
+        if (err.code === 'auth/too-many-requests') {
+            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
+        } else {
+            alert("Error: " + err.message);
+        }
+    }
+});
+
+function resetAdminForm() {
+    editingUserId = null;
+    adminFormTitle.textContent = "Crear Nuevo Usuario";
+    adminFormSubmit.textContent = "Registrar Usuario";
+    adminFormCancel.style.display = "none";
+    document.getElementById('new-user-email').disabled = false;
+    passwordContainer.style.display = "block";
+    newUserPassword.required = true;
+    newUserPassword.type = "password";
+    newUserPassword.placeholder = "Contraseña";
+    adminCreateForm.reset();
+
+    if (currentUserData.role === 'super_admin') {
+        optRoleAdmin.style.display = 'block';
+        optRoleSuperAdmin.style.display = 'block';
+    } else {
+        optRoleAdmin.style.display = 'none';
+        optRoleSuperAdmin.style.display = 'none';
+        document.getElementById('new-user-role').value = 'usuario';
+    }
+}
+
+// --- Phone Number Generation ---
+async function generateUniquePhoneNumber() {
+    let exists = true;
+    let number = "";
+    while (exists) {
+        number = Math.floor(1000 + Math.random() * 9000).toString();
+        const snapshot = await db.collection("users").where("phoneNumber", "==", number).get();
+        if (snapshot.empty) exists = false;
+    }
+    return number;
+}
+
+// --- UI Helper Functions ---
+function showChatScreen() {
+    const displayName = getDisplayName(currentUserData);
+    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=00a884&color=fff&size=100`;
+    const roleClass = `role-${currentUserData.role}`;
+    currentUserName.innerHTML = `${displayName} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
+
+    btnAdminPanel.style.display = (currentUserData.role === 'admin' || currentUserData.role === 'super_admin') ? 'block' : 'none';
+
+    loginScreen.classList.remove('active');
+    chatScreen.classList.add('active');
+}
+
+// --- Notification Permission ---
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+// --- Open Chat ---
+function openChatWith(entity) {
+    activeChatUser = entity;
+    const items = document.querySelectorAll('.contact-item');
+    items.forEach(el => el.classList.remove('active'));
+
+    activeContactName.textContent = entity.isGroup ? entity.name : getDisplayName(entity);
+    const avatar = entity.isGroup ?
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
+    activeContactImg.src = avatar;
+
+    chatHeaderInfo.classList.add('active');
+    chatHeaderText.classList.add('active');
+    welcomeMessage.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+
+    updateHeaderStatus();
+    renderMessages();
+    markMessagesAsRead(entity);
+
+    if (window.innerWidth <= 768) {
+        appContainer.classList.add('show-chat');
+    }
+}
+
+// Update openChatWith to show header actions
+const originalOpenChatWith = openChatWith;
+openChatWith = function (entity) {
+    originalOpenChatWith(entity);
+    const headerActions = document.getElementById('chat-header-actions');
+    if (headerActions) headerActions.style.display = 'flex';
+};
+
+// --- Initialize on page load ---
+document.addEventListener('DOMContentLoaded', () => {
+    // Initial UI state handled by auth listener
+});
