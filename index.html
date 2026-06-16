@@ -3,15 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <!--
-        V3/V7 FIX: Content Security Policy
-        Restringe los orígenes desde los que se pueden cargar scripts, estilos,
-        imágenes y conexiones. Esto protege contra XSS y recursos externos no
-        autorizados.
-        Para CSP completa vía encabezados HTTP (HSTS, X‑Frame‑Options, etc.) deberás
-        configurarlo en tu proveedor de hosting (Cloudflare, Netlify, …).
-    -->
+    <!-- V3/V7 FIX: Content Security Policy -->
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
         script-src 'self' 'unsafe-inline'
@@ -20,7 +12,6 @@
             https://8x8.vc
             https://www.google.com
             https://www.gstatic.com/cpjs/
-            https://www.gstatic.com/recaptcha/
             https://www.google.com/recaptcha/;
         style-src 'self' 'unsafe-inline'
             https://fonts.googleapis.com
@@ -47,17 +38,14 @@
         object-src 'none';
         base-uri 'self';
     ">
-
     <title>Chat SEK</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
     <!-- Jitsi Meet API -->
-    <script src="https://meet.jit.si/external_api.js"></script>
+    <script src='https://meet.jit.si/external_api.js'></script>
 </head>
 <body>
-
     <!-- Login Screen -->
     <div id="login-screen" class="screen active">
         <div class="login-container">
@@ -81,17 +69,12 @@
                 <div id="error-message" class="error-message">Correo o contraseña incorrectos</div>
 
                 <div class="auth-buttons">
-                    <button type="submit" class="btn-login" id="btn-login">
-                        Entrar <i class="fas fa-arrow-right"></i>
-                    </button>
+                    <button type="submit" class="btn-login" id="btn-login">Entrar <i class="fas fa-arrow-right"></i></button>
                     <!-- Registro público eliminado por seguridad -->
                 </div>
-
                 <div style="text-align: center; margin-top: 15px;">
                     <a href="#" id="forgot-password" class="forgot-password"
-                        style="color: var(--primary); font-size: 14px; text-decoration: none;">
-                        ¿Has olvidado tu contraseña?
-                    </a>
+                        style="color: var(--primary); font-size: 14px; text-decoration: none;">¿Has olvidado tu contraseña?</a>
                 </div>
             </form>
         </div>
@@ -100,7 +83,6 @@
     <!-- Chat Screen -->
     <div id="chat-screen" class="screen">
         <div class="app-container">
-
             <!-- Inactivity Modal -->
             <div id="idle-modal" class="modal">
                 <div class="modal-content">
@@ -116,8 +98,7 @@
             <div class="sidebar">
                 <div class="sidebar-header">
                     <div class="user-profile" id="btn-edit-alias" title="Cambiar alias" style="cursor:pointer;">
-                        <img src="https://ui-avatars.com/api/?name=User&background=random"
-                             alt="Mi Perfil" id="my-profile-img">
+                        <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil" id="my-profile-img">
                         <span id="current-user-name">Usuario</span>
                         <i class="fas fa-pen" style="font-size:11px; color:var(--text-secondary); margin-left:5px;"></i>
                     </div>
@@ -158,9 +139,8 @@
                 </div>
 
                 <div id="contact-list" class="contact-list">
-                    <!-- Contacts will be loaded dynamically by JS -->
+                    <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
-
                 <div class="sidebar-footer">
                     <div class="app-version-sidebar">Version 3.2.7</div>
                 </div>
@@ -200,17 +180,14 @@
                                 <i class="fas fa-users"></i>
                                 <input type="text" id="group-name" placeholder="Nombre del grupo" required>
                             </div>
-
                             <div class="input-group" style="margin-top: 15px;">
                                 <i class="fas fa-search"></i>
                                 <input type="text" id="member-search" placeholder="Buscar contactos para añadir...">
                             </div>
-
                             <h3 style="margin-top: 15px;">Selecciona los miembros:</h3>
                             <div class="member-selection-list" id="member-selection-list">
                                 <!-- Contact list with checkboxes will be here -->
                             </div>
-
                             <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear Grupo</button>
                         </div>
                     </div>
@@ -233,8 +210,7 @@
                                     <input type="text" id="new-user-name" placeholder="Nombre completo" required>
                                     <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
                                     <div id="password-container">
-                                        <input type="password" id="new-user-password"
-                                               placeholder="Contraseña (solo para nuevos)" required>
+                                        <input type="password" id="new-user-password" placeholder="Contraseña (solo para nuevos)" required>
                                     </div>
                                     <select id="new-user-role">
                                         <option value="usuario">Usuario</option>
@@ -243,12 +219,10 @@
                                     </select>
                                     <div class="form-actions" style="display: flex; gap: 10px;">
                                         <button type="submit" class="btn-login" id="admin-form-submit">Registrar Usuario</button>
-                                        <button type="button" class="btn-secondary" id="admin-form-cancel"
-                                                style="display: none;">Cancelar</button>
+                                        <button type="button" class="btn-secondary" id="admin-form-cancel" style="display: none;">Cancelar</button>
                                     </div>
                                 </form>
                             </div>
-
                             <!-- User List -->
                             <div class="admin-card">
                                 <h3>Lista de Usuarios</h3>
@@ -267,7 +241,7 @@
                 <div class="chat-header">
                     <div class="chat-header-info">
                         <i class="fas fa-chevron-left" id="btn-back-sidebar"
-                           style="display: none; margin-right: 15px; cursor: pointer; font-size: 20px;"></i>
+                            style="display: none; margin-right: 15px; cursor: pointer; font-size: 20px;"></i>
                         <img id="active-contact-img" src="">
                         <div class="chat-header-text">
                             <h2 id="active-contact-name">Selecciona un chat</h2>
@@ -294,7 +268,7 @@
 
                 <!-- Chat Input -->
                 <div class="chat-input-area" id="chat-input-area" style="display: none; position: relative;">
-                    <!-- Caja de previsualización de cita / respuesta oculta por defecto -->
+                    <!-- Reply box (hidden by default) -->
                     <div id="reply-box-input" class="reply-box-input">
                         <div class="reply-box-content">
                             <span id="reply-sender-name" class="reply-sender"></span>
@@ -309,7 +283,6 @@
                     <div class="input-container">
                         <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
                     </div>
-
                     <div id="voice-btn" class="voice-btn" title="Clic para grabar, clic para enviar">
                         <i class="fas fa-microphone"></i>
                     </div>
@@ -321,16 +294,12 @@
                     <span class="recording-dot"></span>
                     <span id="recording-timer">0:00</span>
                     <span style="flex:1; color: var(--text-secondary); font-size:13px;">Grabando... (máx. 30s)</span>
-                    <button id="cancel-recording" class="rec-btn rec-btn-cancel" title="Cancelar">
-                        <i class="fas fa-times"></i>
-                    </button>
-                    <button id="send-recording" class="rec-btn rec-btn-send" title="Enviar audio">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
+                    <button id="cancel-recording" class="rec-btn rec-btn-cancel" title="Cancelar"><i class="fas fa-times"></i></button>
+                    <button id="send-recording" class="rec-btn rec-btn-send" title="Enviar audio"><i class="fas fa-paper-plane"></i></button>
                 </div>
             </div>
 
-            <!-- Dial Pad Modal (Llamar) -->
+            <!-- Dial Pad Modal -->
             <div id="dialpad-modal" class="modal">
                 <div class="modal-content dialpad-content">
                     <div class="modal-header">
@@ -370,9 +339,7 @@
                             <i class="fas fa-video"></i>
                             <h2 id="call-title">SEK-Time: Llamada en curso</h2>
                         </div>
-                        <button id="btn-end-call" class="btn-danger-circle">
-                            <i class="fas fa-phone-slash"></i>
-                        </button>
+                        <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
                     </div>
                     <div id="jitsi-container"></div>
                     <div id="jitsi-loader" class="jitsi-hidden">
@@ -404,7 +371,6 @@
                 </div>
             </div>
 
-            <!-- Firebase SDKs -->
             <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
             <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
             <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
