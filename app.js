@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.3.1 - App Check activado.");
+        console.log("ChatSEK v3.3.2 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -310,10 +310,6 @@ const memberSearchInput = document.getElementById('member-search');
 const btnBackSidebar = document.getElementById('btn-back-sidebar');
 const appContainer = document.querySelector('.app-container');
 
-// ── Startup sanity check ──────────────────────────────────────────────────
-// If any critical DOM element is missing (e.g. wrong/old index.html deployed),
-// log a clear warning instead of letting a silent ReferenceError stop the
-// entire script (which would freeze the login screen with no explanation).
 (function checkRequiredElements() {
     const required = {
         loginScreen: document.getElementById('login-screen'),
@@ -329,8 +325,7 @@ const appContainer = document.querySelector('.app-container');
     if (missing.length > 0) {
         console.error(
             '⚠️ ChatSEK: faltan elementos del DOM esperados por app.js: ' + missing.join(', ') +
-            '. Es muy probable que el index.html desplegado no coincida con la versión de app.js. ' +
-            'Verifica que ambos archivos se hayan subido juntos a GitHub.'
+            '. Verifica que index.html y app.js se hayan subido juntos a GitHub.'
         );
     }
 })();
@@ -1232,11 +1227,8 @@ btnLogout.addEventListener('click', async () => {
 
 function renderContacts(filter = '') {
     contactList.innerHTML = '';
-
-    // Merge Users and Groups
     let combined = [...allGroups, ...allUsers];
 
-    // Helper declared FIRST to avoid TDZ ReferenceError
     const getLatestTimestamp = (entity) => {
         if (!auth.currentUser) return 0;
         const isGroup = entity.isGroup;
