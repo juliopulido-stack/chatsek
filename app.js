@@ -17,10 +17,10 @@ try {
     if (typeof firebase !== 'undefined' && typeof firebase.appCheck === 'function') {
         const appCheck = firebase.appCheck();
         appCheck.activate(
-            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9s'),
+            new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.2.7 - App Check activado.");
+        console.log("ChatSEK v3.3.1 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -31,6 +31,7 @@ const auth = firebase.auth();
 const storage = firebase.storage();
 
 // ─── Security Helper: XSS Prevention ───────────────────────────────────────
+// Escapes HTML special characters before inserting user content into the DOM.
 function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -159,7 +160,7 @@ function startRecording() {
             // Subir a Firebase Storage y enviar URL
             const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
             const storageRef = storage.ref().child(`chat_audios/${fileName}`);
-
+            
             storageRef.put(blob).then(snapshot => {
                 return snapshot.ref.getDownloadURL();
             }).then(url => {
@@ -202,6 +203,17 @@ function startRecordingUI() {
     }, 1000);
 }
 
+// Declared before stopRecordingUI to avoid temporal dead zone with let
+let isRecording = false;
+
+function stopRecordingUI() {
+    clearInterval(recordingTimerInterval);
+    recordingBar.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+    voiceBtn.classList.remove('recording');
+    isRecording = false;
+}
+
 // Clic en micro: empezar o parar grabación (sin enviar)
 voiceBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -219,14 +231,14 @@ voiceBtn.addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
     const btnSend = e.target.closest('#send-recording');
     const btnCancel = e.target.closest('#cancel-recording');
-
+    
     if (btnSend) {
         e.preventDefault();
         e.stopPropagation();
         isRecording = false;
         stopRecording(false);
     }
-
+    
     if (btnCancel) {
         e.preventDefault();
         e.stopPropagation();
@@ -234,6 +246,7 @@ document.addEventListener('click', (e) => {
         stopRecording(true);
     }
 });
+
 
 // Admin Modal Elements
 const adminModal = document.getElementById('admin-modal');
@@ -263,6 +276,10 @@ const callTypeText = document.getElementById('call-type-text');
 const btnAcceptCall = document.getElementById('btn-accept-call');
 const btnDeclineCall = document.getElementById('btn-decline-call');
 
+const idleModal = document.getElementById('idle-modal');
+const btnIdleConfirm = document.getElementById('btn-idle-confirm');
+const idleTimerDisplay = document.getElementById('idle-timer-display');
+
 // Group Modal Elements
 const btnNewGroup = document.getElementById('btn-new-group');
 const groupModal = document.getElementById('group-modal');
@@ -288,11 +305,1431 @@ const closeDirectoryModal = document.getElementById('close-directory-modal');
 const directorySearchInput = document.getElementById('directory-search');
 const directoryList = document.getElementById('directory-list');
 
-// Mobile Back Button
+const groupNameInput = document.getElementById('group-name');
+const memberSearchInput = document.getElementById('member-search');
 const btnBackSidebar = document.getElementById('btn-back-sidebar');
 const appContainer = document.querySelector('.app-container');
 
+// ── Startup sanity check ──────────────────────────────────────────────────
+// If any critical DOM element is missing (e.g. wrong/old index.html deployed),
+// log a clear warning instead of letting a silent ReferenceError stop the
+// entire script (which would freeze the login screen with no explanation).
+(function checkRequiredElements() {
+    const required = {
+        loginScreen: document.getElementById('login-screen'),
+        chatScreen: document.getElementById('chat-screen'),
+        loginForm: document.getElementById('login-form'),
+        contactList: document.getElementById('contact-list'),
+        directoryModal: document.getElementById('directory-modal'),
+        groupNameInput: document.getElementById('group-name'),
+        memberSearchInput: document.getElementById('member-search'),
+        appContainer: document.querySelector('.app-container')
+    };
+    const missing = Object.entries(required).filter(([k, v]) => !v).map(([k]) => k);
+    if (missing.length > 0) {
+        console.error(
+            '⚠️ ChatSEK: faltan elementos del DOM esperados por app.js: ' + missing.join(', ') +
+            '. Es muy probable que el index.html desplegado no coincida con la versión de app.js. ' +
+            'Verifica que ambos archivos se hayan subido juntos a GitHub.'
+        );
+    }
+})();
+
+// --- Profanity & Strike System ---
+const PROFANITY_LIST = ["mierda", "puta", "puto", "gilipollas", "cabron", "cabrón", "follar", "hijo de puta", "joder", "coño", "maricon", "maricón", "zorra", "bollera", "pendejo", "idiota", "estupido", "estúpido"];
+
+const STRIKE_BANS = {
+    1: 1 * 60 * 60 * 1000,           // 1 hora
+    2: 5 * 60 * 60 * 1000,           // 5 horas
+    3: 24 * 60 * 60 * 1000,          // 1 día
+    4: 15 * 24 * 60 * 60 * 1000,     // 15 días
+    5: 30 * 24 * 60 * 60 * 1000,     // 1 mes
+    6: "permanent"                    // Permanente
+};
+
+function hasProfanity(text) {
+    const lowerText = text.toLowerCase();
+    return PROFANITY_LIST.some(word => lowerText.includes(word));
+}
+
+async function applyStrike() {
+    if (!auth.currentUser) return;
+
+    const userRef = db.collection("users").doc(auth.currentUser.uid);
+    const doc = await userRef.get();
+    const data = doc.data();
+
+    const currentStrikes = (data.strikes || 0) + 1;
+    let banDuration = STRIKE_BANS[currentStrikes] || STRIKE_BANS[5];
+    let banUntil = null;
+
+    if (banDuration === "permanent" || currentStrikes >= 6) {
+        banUntil = "permanent";
+    } else {
+        banUntil = firebase.firestore.Timestamp.fromMillis(Date.now() + banDuration);
+    }
+
+    await userRef.update({
+        strikes: currentStrikes,
+        banUntil: banUntil,
+        status: "offline"
+    });
+
+    alert(`⚠️ SANCIÓN POR LENGUAJE INAPROPIADO\n\nHas acumulado ${currentStrikes} falta(s).\nTu cuenta ha sido suspendida temporalmente.`);
+    location.reload(); // Force check
+}
+
+function checkBanStatus(data) {
+    if (!data.banUntil) return false;
+
+    if (data.banUntil === "permanent") {
+        showBanScreen("Sanción Permanente", "Has sido expulsado definitivamente por acumular 6 faltas. Contacta con un SuperAdmin para solicitar el desbloqueo.");
+        return true;
+    }
+
+    const now = Date.now();
+    const banDate = data.banUntil.toMillis();
+
+    if (now < banDate) {
+        const timeLeft = banDate - now;
+        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const days = Math.floor(hours / 24);
+
+        let msg = `Tu cuenta está suspendida. Quedan `;
+        if (days > 0) msg += `${days} días y ${hours % 24} horas.`;
+        else if (hours > 0) msg += `${hours} horas y ${minutes} minutos.`;
+        else msg += `${minutes} minutos.`;
+
+        showBanScreen("Cuenta Suspendida", msg);
+        return true;
+    }
+    return false;
+}
+
+function showBanScreen(title, message) {
+    isUserBanned = true;
+    document.body.innerHTML = `
+        <div style="background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: 'Inter', sans-serif; text-align: center; padding: 20px;">
+            <div style="max-width: 500px; background: #1e293b; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 0 50px rgba(244, 63, 94, 0.2);">
+                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px;"></i>
+                <h1 style="font-size: 32px; margin-bottom: 20px;">${title}</h1>
+                <p style="color: #94a3b8; font-size: 18px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+                <button onclick="location.reload()" class="btn-login" style="width: 100%;">Reintentar conexión</button>
+            </div>
+        </div>
+    `;
+}
+
+// --- Auth States ---
+
+auth.onAuthStateChanged(async (user) => {
+    if (user) {
+        await handleUserLogin(user);
+    } else {
+        showLoginScreen();
+    }
+});
+
+// V6 FIX: reservedNumbers removed — personal data must not be hardcoded in public source.
+// Phone numbers are now always generated randomly and stored in Firestore.
+async function generateUniquePhoneNumber() {
+    let exists = true;
+    let number = "";
+    while (exists) {
+        number = Math.floor(1000 + Math.random() * 9000).toString();
+        const snapshot = await db.collection("users").where("phoneNumber", "==", number).get();
+        if (snapshot.empty) exists = false;
+    }
+    return number;
+}
+
+async function handleUserLogin(user) {
+    const userDocRef = db.collection("users").doc(user.uid);
+    const doc = await userDocRef.get();
+
+    if (!doc.exists) {
+        const name = user.email.split('@')[0];
+        currentUserData = {
+            uid: user.uid,
+            email: user.email,
+            name: name,
+            role: "usuario",
+            status: "online",
+            pinnedChats: [],
+            phoneNumber: await generateUniquePhoneNumber(),
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await userDocRef.set(currentUserData);
+    } else {
+        currentUserData = { uid: user.uid, ...doc.data() };
+
+        // Assign phone number if missing (migration)
+        if (!currentUserData.phoneNumber) {
+            currentUserData.phoneNumber = await generateUniquePhoneNumber();
+            await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
+        }
+
+        // Check Disabled Status
+        if (currentUserData.disabled === true) {
+            showBanScreen("Cuenta Desactivada", "Tu cuenta ha sido desactivada por un administrador. Contacta con un SuperAdmin para solicitar el acceso.");
+            return;
+        }
+
+        // Check Ban Status
+        if (checkBanStatus(currentUserData)) {
+            return;
+        }
+        await updateUserStatus("online");
+    }
+
+    setupUsersListener();
+    setupMessagesListener();
+    showChatScreen();
+    startIdleMonitoring();
+    requestNotificationPermission();
+
+    // Update lastSeen every 10 minutes while active
+    setInterval(() => {
+        if (auth.currentUser && document.visibilityState === 'visible') {
+            updateUserStatus("online");
+        }
+    }, 10 * 60 * 1000);
+}
+
+// --- Inactivity Logic ---
+
+function startIdleMonitoring() {
+    stopIdleMonitoring(); // Reset if already running
+    resetIdleTimer();
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.addEventListener(evt, resetIdleTimer);
+    });
+}
+
+function stopIdleMonitoring() {
+    clearTimeout(idleTimeout);
+    clearTimeout(logoutTimeout);
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(evt => {
+        window.removeEventListener(evt, resetIdleTimer);
+    });
+}
+
+function resetIdleTimer() {
+    if (idleModal.classList.contains('active')) return; // Don't reset if modal is showing
+
+    clearTimeout(idleTimeout);
+    idleTimeout = setTimeout(showIdleModal, IDLE_TIME_LIMIT);
+}
+
+function showIdleModal() {
+    idleModal.classList.add('active');
+    updateUserStatus("offline"); // Mark as away/offline in background
+
+    let secondsLeft = 120;
+    idleTimerDisplay.textContent = `2:00`;
+
+    clearInterval(window.logoutCountdown);
+    window.logoutCountdown = setInterval(() => {
+        secondsLeft--;
+        const mins = Math.floor(secondsLeft / 60);
+        const secs = secondsLeft % 60;
+        idleTimerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+        if (secondsLeft <= 0) {
+            clearInterval(window.logoutCountdown);
+            handleAutoLogout();
+        }
+    }, 1000);
+}
+
+async function handleAutoLogout() {
+    idleModal.classList.remove('active');
+    await updateUserStatus("offline");
+    auth.signOut();
+    alert("Sesión cerrada por inactividad.");
+}
+
+btnIdleConfirm.addEventListener('click', () => {
+    idleModal.classList.remove('active');
+    clearInterval(window.logoutCountdown);
+    updateUserStatus("online");
+    resetIdleTimer();
+});
+
+// --- Presence System ---
+
+async function updateUserStatus(status) {
+    if (!auth.currentUser) return;
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({
+            status: status,
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) {
+        console.error("Error updating status:", e);
+    }
+}
+
+// Handle Page Visibility (Online/Away)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        updateUserStatus("online");
+    } else {
+        // We set to offline or away when tab is hidden to be more accurate
+        updateUserStatus("offline");
+    }
+});
+
+// Handle Window Close
+window.addEventListener('beforeunload', (event) => {
+    if (auth.currentUser) {
+        // Use a synchronous-ish update or navigator.sendBeacon if needed,
+        // but for Firestore, a direct update usually works if not too many fields.
+        db.collection("users").doc(auth.currentUser.uid).update({
+            status: "offline",
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
+});
+
+function showLoginScreen() {
+    currentUserData = null;
+    activeChatUser = null;
+    if (unsubscribeMessages) unsubscribeMessages();
+    if (unsubscribeUsers) unsubscribeUsers();
+    if (unsubscribeGroups) unsubscribeGroups();
+    chatScreen.classList.remove('active');
+    loginScreen.classList.add('active');
+}
+
+// --- Alias / Display Name Helper ---
+function getDisplayName(user) {
+    return (user && user.alias && user.alias.trim()) ? user.alias.trim() : user.name;
+}
+
+function showChatScreen() {
+    const displayName = getDisplayName(currentUserData);
+    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=00a884&color=fff&size=100`;
+    const roleClass = `role-${currentUserData.role}`;
+    currentUserName.innerHTML = `${displayName} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
+
+    btnAdminPanel.style.display = (currentUserData.role === 'admin' || currentUserData.role === 'super_admin') ? 'block' : 'none';
+
+    loginScreen.classList.remove('active');
+    chatScreen.classList.add('active');
+}
+
+// --- SEK-Time Call Logic ---
+
+btnVideoCall.addEventListener('click', () => startCall(false));
+btnVoiceCall.addEventListener('click', () => startCall(true));
+
+function startCall(audioOnly, isReceiver = false, remoteUser = null) {
+    const targetUser = isReceiver ? remoteUser : activeChatUser;
+    if (!targetUser) return;
+
+    // Verify Jitsi library availability
+    if (typeof JitsiMeetExternalAPI === 'undefined') {
+        alert("⚠️ Error: La librería de SEK-Time no se ha cargado correctamente. Por favor, recarga la página.");
+        console.error("JitsiMeetExternalAPI is not defined");
+        return;
+    }
+
+    callModal.classList.add('active');
+    incomingCallOverlay.classList.remove('active');
+    jitsiContainer.innerHTML = ''; // Clear previous calls
+
+    // Show loader
+    const loader = document.getElementById('jitsi-loader');
+    if (loader) loader.classList.remove('jitsi-hidden');
+
+    // Multi-stage safety nets for the loader
+    const loaderTimeoutFast = setTimeout(() => {
+        if (loader && !loader.classList.contains('jitsi-hidden')) {
+            console.warn("Jitsi: Connection taking longer than expected...");
+        }
+    }, 5000);
+
+    const loaderTimeoutFinal = setTimeout(() => {
+        if (loader) loader.classList.add('jitsi-hidden');
+        console.error("Jitsi: Connection timeout, hiding loader");
+    }, 15000);
+
+    try {
+        const domain = "meet.jit.si";
+        const ids = [auth.currentUser.uid, targetUser.uid].sort();
+        const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
+
+        const options = {
+            roomName: roomName,
+            width: '100%',
+            height: '100%',
+            parentNode: jitsiContainer,
+            userInfo: {
+                displayName: currentUserData.name
+            },
+            configOverwrite: {
+                prejoinPageEnabled: false,
+                prejoinConfig: { enabled: false },
+                startWithAudioMuted: false,
+                startWithVideoMuted: audioOnly,
+                disableDeepLinking: true,
+                enableWelcomePage: false,
+                enableClosePage: false
+            },
+            interfaceConfigOverwrite: {
+                SHOW_JITSI_WATERMARK: false,
+                DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
+                TOOLBAR_BUTTONS: [
+                    'microphone', 'camera', 'desktop', 'fullscreen',
+                    'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
+                ]
+            }
+        };
+
+        jitsiApi = new JitsiMeetExternalAPI(domain, options);
+
+        jitsiApi.addEventListeners({
+            readyToClose: endCall,
+            videoConferenceLeft: endCall,
+            videoConferenceJoined: () => {
+                console.log("SEK-Time: Conexión establecida correctamente");
+                clearTimeout(loaderTimeoutFast);
+                clearTimeout(loaderTimeoutFinal);
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            participantJoined: (event) => {
+                console.log("SEK-Time: Participante unido:", event.displayName);
+            },
+            cameraError: (error) => {
+                console.error("SEK-Time: Error de cámara:", error);
+                alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
+                if (loader) loader.classList.add('jitsi-hidden');
+            },
+            micError: (error) => {
+                console.error("SEK-Time: Error de micrófono:", error);
+            }
+        });
+
+        if (!isReceiver) {
+            const type = audioOnly ? "Llamada de voz" : "Videollamada";
+            sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
+        }
+    } catch (error) {
+        console.error("SEK-Time: Error crítico iniciando llamada:", error);
+        alert("Hubo un error al iniciar la llamada. Por favor, inténtalo de nuevo.");
+        clearTimeout(loaderTimeoutFast);
+        clearTimeout(loaderTimeoutFinal);
+        if (loader) loader.classList.add('jitsi-hidden');
+        endCall();
+    }
+}
+
+function endCall() {
+    if (jitsiApi) {
+        jitsiApi.dispose();
+        jitsiApi = null;
+    }
+    jitsiContainer.innerHTML = '';
+    callModal.classList.remove('active');
+}
+
+btnEndCall.addEventListener('click', endCall);
+
+// --- Incoming Call UI ---
+
+function handleIncomingCall(msg) {
+    if (processedCallIds.has(msg.id)) return;
+    processedCallIds.add(msg.id);
+
+    const caller = allUsers.find(u => u.uid === msg.senderId);
+    if (!caller) return;
+
+    const callerDisplayName = getDisplayName(caller);
+    callerName.textContent = callerDisplayName;
+    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(callerDisplayName)}&background=random&color=fff&size=200`;
+    callTypeText.textContent = msg.audioOnly ? "Llamada de voz entrante..." : "Videollamada entrante...";
+
+    incomingCallOverlay.classList.add('active');
+
+    // Button handlers for this specific call
+    btnAcceptCall.onclick = () => {
+        startCall(msg.audioOnly || false, true, caller);
+    };
+
+    btnDeclineCall.onclick = () => {
+        incomingCallOverlay.classList.remove('active');
+    };
+
+    // Auto-close after 30 seconds if not answered
+    setTimeout(() => {
+        incomingCallOverlay.classList.remove('active');
+    }, 30000);
+}
+
+// --- Admin Panel Logic ---
+
+btnAdminPanel.addEventListener('click', () => {
+    adminModal.classList.add('active');
+    resetAdminForm();
+    renderAdminUserList();
+});
+
+closeAdminModal.addEventListener('click', () => adminModal.classList.remove('active'));
+
+function resetAdminForm() {
+    editingUserId = null;
+    adminFormTitle.textContent = "Crear Nuevo Usuario";
+    adminFormSubmit.textContent = "Registrar Usuario";
+    adminFormCancel.style.display = "none";
+    document.getElementById('new-user-email').disabled = false;
+    passwordContainer.style.display = "block";
+    newUserPassword.required = true;
+    newUserPassword.type = "password";
+    newUserPassword.placeholder = "Contraseña";
+    adminCreateForm.reset();
+
+    if (currentUserData.role === 'super_admin') {
+        optRoleAdmin.style.display = 'block';
+        optRoleSuperAdmin.style.display = 'block';
+    } else {
+        optRoleAdmin.style.display = 'none';
+        optRoleSuperAdmin.style.display = 'none';
+        document.getElementById('new-user-role').value = 'usuario';
+    }
+}
+
+adminFormCancel.addEventListener('click', resetAdminForm);
+
+function renderAdminUserList() {
+    adminUserList.innerHTML = '';
+    const allRegistered = [currentUserData, ...allUsers];
+
+    allRegistered.forEach(user => {
+        const item = document.createElement('div');
+        item.className = 'admin-user-item';
+        const roleClass = `role-${user.role}`;
+        const isSelf = user.uid === auth.currentUser.uid;
+        const isSuperAdmin = currentUserData.role === 'super_admin';
+        const targetIsSuperAdmin = user.role === 'super_admin';
+        const isDisabled = user.disabled === true;
+
+        let actions = `<div class="user-actions">`;
+
+        // Editar: solo super_admin puede editar a cualquiera
+        if (isSuperAdmin) {
+            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary);" title="Editar"></i>`;
+        }
+
+        // Encender/Apagar: solo super_admin, no puede apagarse a sí mismo ni a otros super_admin
+        if (isSuperAdmin && !isSelf && !targetIsSuperAdmin) {
+            const powerColor = isDisabled ? '#22c55e' : '#f43f5e';
+            const powerIcon = isDisabled ? 'fa-toggle-on' : 'fa-toggle-off';
+            const powerTitle = isDisabled ? 'Activar usuario' : 'Desactivar usuario';
+            actions += `<i class="fas ${powerIcon}" onclick="toggleUserDisabled('${user.uid}', ${isDisabled})" style="color: ${powerColor}; font-size: 20px;" title="${powerTitle}"></i>`;
+        }
+
+        // Borrar y resetear strikes: solo super_admin, no puede borrarse a sí mismo
+        if (isSuperAdmin && !isSelf) {
+            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: #f43f5e;" title="Borrar"></i>`;
+            if (user.strikes > 0 || user.banUntil) {
+                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981;" title="Resetear Faltas"></i>`;
+            }
+        }
+
+        actions += `</div>`;
+
+        const disabledBadge = isDisabled ? `<span class="role-badge" style="background:#f43f5e;">desactivado</span>` : '';
+
+        item.innerHTML = `
+            <div>
+                <strong>${user.name}</strong> <span style="font-size:12px;color:var(--text-secondary)">(${user.email})</span>
+                <span class="role-badge ${roleClass}">${user.role}</span>
+                ${disabledBadge}
+            </div>
+            ${actions}
+        `;
+        if (isDisabled) item.style.opacity = '0.5';
+        adminUserList.appendChild(item);
+    });
+}
+
+window.startEditUser = (uid) => {
+    const user = [currentUserData, ...allUsers].find(u => u.uid === uid);
+    if (!user) return;
+
+    editingUserId = uid;
+    adminFormTitle.textContent = "Editando: " + user.name;
+    adminFormSubmit.textContent = "Guardar Cambios";
+    adminFormCancel.style.display = "block";
+
+    document.getElementById('new-user-name').value = user.name;
+    document.getElementById('new-user-email').value = user.email;
+    document.getElementById('new-user-email').disabled = true;
+    document.getElementById('new-user-role').value = user.role;
+
+    // V2 FIX: Never display or load stored passwords.
+    // Passwords are managed exclusively by Firebase Auth.
+    passwordContainer.style.display = "none";
+    newUserPassword.required = false;
+    newUserPassword.value = "";
+};
+
+window.deleteUser = async (uid) => {
+    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
+    try {
+        // 1. Delete Firestore document
+        await db.collection("users").doc(uid).delete();
+
+        // 2. Attempt to delete from Firebase Auth via Cloud Function
+        // Requires a deployed Cloud Function named 'deleteAuthUser'
+        try {
+            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
+            if (deleteAuthUser) {
+                await deleteAuthUser({ uid });
+            } else {
+                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
+            }
+        } catch (fnErr) {
+            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
+        }
+
+        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.toggleUserDisabled = async (uid, currentlyDisabled) => {
+    const action = currentlyDisabled ? 'activar' : 'desactivar';
+    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            disabled: !currentlyDisabled
+        });
+        renderAdminUserList();
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+window.resetStrikes = async (uid) => {
+    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
+    try {
+        await db.collection("users").doc(uid).update({
+            strikes: 0,
+            banUntil: null
+        });
+        alert("Faltas reseteadas con éxito.");
+    } catch (e) {
+        alert("Error: " + e.message);
+    }
+};
+
+adminCreateForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('new-user-name').value.trim();
+    const email = document.getElementById('new-user-email').value.trim();
+    const password = newUserPassword.value;
+    const role = document.getElementById('new-user-role').value;
+
+    try {
+        if (editingUserId) {
+            // V2 FIX: Only update name and role — never store or touch passwords.
+            const updateData = { name: name, role: role };
+            await db.collection("users").doc(editingUserId).update(updateData);
+            alert("Usuario actualizado");
+        } else {
+            // V9 FIX: Use the primary auth instance. Save admin credentials
+            // to restore the session after creating the new user account.
+            const adminEmail = auth.currentUser.email;
+            const adminPasswordInput = prompt(
+                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
+            );
+            if (!adminPasswordInput) return;
+
+            // Create the new user (this signs us out of the admin session)
+            const cred = await auth.createUserWithEmailAndPassword(email, password);
+            const newUid = cred.user.uid;
+
+            // V2 FIX: Never store the password in Firestore.
+            await db.collection("users").doc(newUid).set({
+                uid: newUid,
+                email: email,
+                name: name,
+                role: role,
+                status: "offline",
+                phoneNumber: await generateUniquePhoneNumber(),
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Sign out the newly created user and restore the admin session
+            await auth.signOut();
+            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
+            alert("Usuario registrado: " + email);
+        }
+        resetAdminForm();
+    } catch (err) {
+        console.error("Error completo en Admin Panel:", err);
+        if (err.code === 'auth/too-many-requests') {
+            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
+        } else {
+            alert("Error: " + err.message);
+        }
+    }
+});
+
+// --- Chat Listeners ---
+
+function setupUsersListener() {
+    unsubscribeUsers = db.collection("users").onSnapshot((snapshot) => {
+        allUsers = [];
+        snapshot.forEach(doc => {
+            if (doc.id !== auth.currentUser.uid) {
+                allUsers.push({ uid: doc.id, ...doc.data() });
+            } else {
+                currentUserData = { uid: doc.id, ...doc.data() };
+            }
+        });
+        renderContacts();
+        setupGroupsListener(); // Refresh groups too
+        if (activeChatUser && !activeChatUser.isGroup) {
+            const updatedActive = allUsers.find(u => u.uid === activeChatUser.uid);
+            if (updatedActive) {
+                activeChatUser = updatedActive;
+                updateHeaderStatus();
+            }
+        }
+        if (adminModal.classList.contains('active')) renderAdminUserList();
+    });
+}
+
+function setupGroupsListener() {
+    if (unsubscribeGroups) unsubscribeGroups();
+    unsubscribeGroups = db.collection("groups")
+        .where("members", "array-contains", auth.currentUser.uid)
+        .onSnapshot((snapshot) => {
+            allGroups = [];
+            snapshot.forEach(doc => {
+                allGroups.push({ uid: doc.id, ...doc.data(), isGroup: true });
+            });
+            renderContacts();
+            if (activeChatUser && activeChatUser.isGroup) {
+                const updatedActive = allGroups.find(g => g.uid === activeChatUser.uid);
+                if (updatedActive) {
+                    activeChatUser = updatedActive;
+                    updateHeaderStatus();
+                }
+            }
+        });
+}
+
+function updateHeaderStatus() {
+    if (!activeChatUser) return;
+
+    if (activeChatUser.isGroup) {
+        chatStatus.textContent = `${activeChatUser.members.length} miembros`;
+        chatStatus.classList.remove('online');
+        return;
+    }
+
+    if (activeChatUser.status === "online") {
+        chatStatus.innerHTML = `<span class="status-dot"></span> en línea`;
+        chatStatus.classList.add('online');
+    } else {
+        chatStatus.classList.remove('online');
+        if (activeChatUser.lastSeen) {
+            const date = activeChatUser.lastSeen.toDate();
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            let timeStr;
+            if (diffMins < 1) {
+                timeStr = 'hace un momento';
+            } else {
+                const hh = date.getHours().toString().padStart(2, '0');
+                const mm = date.getMinutes().toString().padStart(2, '0');
+                const isToday = date.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = date.toDateString() === yesterday.toDateString();
+
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${date.getDate()}/${date.getMonth() + 1} a las ${hh}:${mm}`;
+            }
+            chatStatus.textContent = `última vez ${timeStr}`;
+        } else {
+            chatStatus.textContent = 'desconectado';
+        }
+    }
+}
+
+function setupMessagesListener() {
+    unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
+        .onSnapshot((snapshot) => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === "added") {
+                    const msg = { id: change.doc.id, ...change.doc.data() };
+                    const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                    const isNew = msgTime > listenerStartTime;
+
+                    // Detect Incoming Call
+                    if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
+                        const thirtySecondsAgo = Date.now() - 30000;
+                        if (msgTime > thirtySecondsAgo && isNew) {
+                            handleIncomingCall(msg);
+                        }
+                    }
+
+                    // Browser notification for new messages (not from self, not calls)
+                    if (isNew && msg.senderId !== auth.currentUser.uid && msg.type !== 'call') {
+                        const isDirectToMe = msg.receiverId === auth.currentUser.uid;
+                        const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
+
+                        if (isDirectToMe || isGroupWithMe) {
+                            // Auto-read if the chat is currently open and the tab is visible
+                            const chatIsOpen = activeChatUser && (
+                                activeChatUser.uid === msg.senderId ||
+                                (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
+                            );
+
+                            if (chatIsOpen && document.visibilityState === 'visible') {
+                                // Marcar en Set local Y en Firestore
+                                readMessageIds.add(msg.id);
+                                db.collection("messages").doc(msg.id).update({
+                                    readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
+                                });
+                            } else {
+                                // Show browser notification
+                                sendBrowserNotification(msg);
+                            }
+                        }
+                    }
+                }
+            });
+
+            allMessages = [];
+            snapshot.forEach((doc) => {
+                const msg = { id: doc.id, ...doc.data() };
+                allMessages.push(msg);
+                // Si Firestore ya tiene este mensaje como leído por mí, añadirlo al Set local
+                if (msg.readBy && auth.currentUser && msg.readBy.includes(auth.currentUser.uid)) {
+                    readMessageIds.add(msg.id);
+                }
+            });
+            renderContacts();
+            if (activeChatUser) renderMessages();
+        });
+}
+
+// --- Browser Notifications ---
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+function sendBrowserNotification(msg) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return; // Only when tab is hidden
+
+    const sender = allUsers.find(u => u.uid === msg.senderId);
+    const senderName = sender ? getDisplayName(sender) : 'Alguien';
+
+    let body = msg.text;
+    if (msg.type === 'image') body = '📷 Imagen';
+    if (msg.type === 'file') body = '📎 Archivo';
+
+    const notification = new Notification(`💬 ${senderName} te ha escrito`, {
+        body: body,
+        icon: `https://ui-avatars.com/api/?name=${encodeURIComponent(senderName)}&background=00a884&color=fff&size=64`,
+        badge: `https://ui-avatars.com/api/?name=SEK&background=00a884&color=fff&size=32`,
+        tag: msg.senderId // Agrupa notificaciones del mismo usuario
+    });
+
+    notification.onclick = () => {
+        window.focus();
+        notification.close();
+        if (sender) openChatWith(sender);
+    };
+
+    // Auto-cerrar a los 5 segundos
+    setTimeout(() => notification.close(), 5000);
+}
+
+loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        await auth.signInWithEmailAndPassword(emailInput.value.trim(), passwordInput.value);
+    } catch (e) {
+        errorMessage.textContent = "Error: " + e.message;
+        errorMessage.classList.add('show');
+    }
+});
+
+// --- Password Reset ---
+if (forgotPasswordBtn) {
+    forgotPasswordBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+
+        // Use the email already typed in the login form, or ask inline
+        let email = emailInput.value.trim();
+        if (!email) {
+            // Show a simple inline input below the forgot-password link instead of prompt()
+            const existingBox = document.getElementById('reset-email-box');
+            if (existingBox) { existingBox.remove(); return; }
+
+            const box = document.createElement('div');
+            box.id = 'reset-email-box';
+            box.style.cssText = 'margin-top:10px; display:flex; gap:8px; align-items:center;';
+            box.innerHTML = `
+                <input type="email" id="reset-email-input" placeholder="Tu correo electrónico"
+                    style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-primary); font-size:14px;">
+                <button id="reset-email-send" class="btn-login" style="padding:8px 14px; font-size:13px;">Enviar</button>
+            `;
+            forgotPasswordBtn.parentElement.appendChild(box);
+            document.getElementById('reset-email-input').focus();
+
+            document.getElementById('reset-email-send').addEventListener('click', async () => {
+                const val = document.getElementById('reset-email-input').value.trim();
+                if (!val) return;
+                box.remove();
+                await sendPasswordReset(val);
+            });
+            return;
+        }
+        await sendPasswordReset(email);
+    });
+}
+
+async function sendPasswordReset(email) {
+    try {
+        await auth.sendPasswordResetEmail(email);
+        alert(`Si el correo "${email}" está registrado, recibirás un enlace para restablecer tu contraseña. Revisa también tu carpeta de SPAM.`);
+    } catch (e) {
+        console.error("Error al enviar correo de recuperación:", e);
+        if (e.code === 'auth/user-not-found') {
+            alert("Este correo no está registrado en el sistema.");
+        } else if (e.code === 'auth/invalid-email') {
+            alert("El formato del correo introducido no es válido.");
+        } else {
+            alert("Error al enviar el correo de recuperación: " + e.message);
+        }
+    }
+}
+
+btnLogout.addEventListener('click', async () => {
+    await updateUserStatus("offline");
+    auth.signOut();
+});
+
+// --- Render Chat ---
+
+function renderContacts(filter = '') {
+    contactList.innerHTML = '';
+
+    // Merge Users and Groups
+    let combined = [...allGroups, ...allUsers];
+
+    // Helper declared FIRST to avoid TDZ ReferenceError
+    const getLatestTimestamp = (entity) => {
+        if (!auth.currentUser) return 0;
+        const isGroup = entity.isGroup;
+        const chatNotes = allMessages.filter(m =>
+            isGroup ? (m.groupId === entity.uid) :
+                ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) ||
+                 (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
+        );
+        if (chatNotes.length > 0) {
+            const last = chatNotes[chatNotes.length - 1];
+            if (last.timestamp) {
+                return typeof last.timestamp.toMillis === 'function' ? last.timestamp.toMillis() : Date.now();
+            }
+            return Date.now();
+        }
+        return 0;
+    };
+
+    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
+
+    combined = combined.filter(u => {
+        if (pinnedIds.includes(u.uid)) return true;
+        if (filter) {
+            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
+            return nameToSearch.toLowerCase().includes(filter);
+        }
+        return getLatestTimestamp(u) > 0;
+    });
+
+    combined.sort((a, b) => {
+        const aPinned = pinnedIds.includes(a.uid);
+        const bPinned = pinnedIds.includes(b.uid);
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        return getLatestTimestamp(b) - getLatestTimestamp(a);
+    });
+
+    combined.forEach(entity => {
+        const isGroup = entity.isGroup;
+        const isPinned = pinnedIds.includes(entity.uid);
+
+        const chatNotes = allMessages.filter(m =>
+            isGroup ? (m.groupId === entity.uid) :
+                ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) ||
+                    (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
+        );
+        let lastText = isGroup ? "Grupo creado" : "Haz clic para chatear", lastTime = "";
+        if (chatNotes.length > 0) {
+            const last = chatNotes[chatNotes.length - 1];
+            lastTime = last.time;
+            if (last.type === 'audio') lastText = '🎤 Audio';
+            else if (last.type === 'image') lastText = '📷 Imagen';
+            else if (last.type === 'file') lastText = '📎 Archivo';
+            else if (last.type === 'call') lastText = '📞 Llamada';
+            else lastText = escapeHtml(last.text); // XSS fix: escape user-generated text
+        }
+
+        const item = document.createElement('div');
+        item.className = 'contact-item' + (isPinned ? ' pinned' : '');
+        if (activeChatUser && activeChatUser.uid === entity.uid) item.classList.add('active');
+
+        const avatar = isGroup ?
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
+
+        const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
+        const roleClass = `role-${entity.role}`;
+        const entityDisplayName = escapeHtml(isGroup ? entity.name : getDisplayName(entity));
+        const safeRole = escapeHtml(entity.role || '');
+        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${safeRole}</span>` : '';
+
+        const unreadCount = getUnreadCount(entity);
+        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
+
+        let contactStatusHtml = '';
+        if (!isGroup) {
+            if (entity.status === 'online') {
+                contactStatusHtml = `<span class="contact-status online-text">en línea</span>`;
+            } else if (entity.lastSeen) {
+                const d = entity.lastSeen.toDate ? entity.lastSeen.toDate() : new Date(entity.lastSeen);
+                const now = new Date();
+                const hh = d.getHours().toString().padStart(2, '0');
+                const mm = d.getMinutes().toString().padStart(2, '0');
+                const isToday = d.toDateString() === now.toDateString();
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                const isYesterday = d.toDateString() === yesterday.toDateString();
+                let timeStr;
+                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
+                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
+                else timeStr = `${d.getDate()}/${d.getMonth() + 1} a las ${hh}:${mm}`;
+                contactStatusHtml = `<span class="contact-status offline-text">última vez ${timeStr}</span>`;
+            } else {
+                contactStatusHtml = `<span class="contact-status offline-text">desconectado</span>`;
+            }
+        } else {
+            contactStatusHtml = `<span class="contact-status offline-text">${entity.members ? entity.members.length + ' miembros' : 'Grupo'}</span>`;
+        }
+
+        item.innerHTML = `
+            ${indicator}
+            <img src="${avatar}">
+            <div class="contact-info">
+                <div class="contact-name-time">
+                    <span class="contact-name">${entityDisplayName} ${badge}</span>
+                    <div style="display: flex; align-items: center;">
+                        <span class="contact-time">${lastTime}</span>
+                        <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
+                    </div>
+                </div>
+                <div class="contact-status-row">${contactStatusHtml}</div>
+                <div class="contact-message-row">
+                    <div class="contact-message">${lastText}</div>
+                    ${unreadBadge}
+                </div>
+            </div>`;
+
+        // Handle Pin Toggle
+        const pinBtn = item.querySelector('.btn-pin');
+        pinBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevents opening the chat
+            togglePin(entity.uid);
+        });
+
+        item.addEventListener('click', () => {
+            activeChatUser = entity;
+            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+            item.classList.add('active');
+            activeContactName.textContent = isGroup ? entity.name : getDisplayName(entity);
+            activeContactImg.src = avatar;
+            chatHeaderInfo.classList.add('active');
+            chatHeaderText.classList.add('active');
+            welcomeMessage.style.display = 'none';
+            chatInputArea.style.display = 'flex';
+            document.getElementById('chat-header-actions').style.display = 'flex';
+
+            updateHeaderStatus();
+            renderMessages();
+            markMessagesAsRead(entity);
+
+            // Mobile view toggle
+            if (window.innerWidth <= 768) {
+                appContainer.classList.add('show-chat');
+            }
+        });
+        contactList.appendChild(item);
+    });
+}
+
+async function togglePin(entityId) {
+    if (!currentUserData) return;
+
+    let pinned = currentUserData.pinnedChats || [];
+    if (pinned.includes(entityId)) {
+        pinned = pinned.filter(id => id !== entityId);
+    } else {
+        pinned.push(entityId);
+    }
+
+    try {
+        await db.collection("users").doc(auth.currentUser.uid).update({
+            pinnedChats: pinned
+        });
+        // Listener will trigger renderContacts automatically
+    } catch (e) {
+        console.error("Error toggling pin:", e);
+    }
+}
+
+function renderMessages() {
+    Array.from(chatMessages.children).forEach(c => { if (c.id !== 'welcome-message') c.remove(); });
+    if (!activeChatUser) return;
+
+    const messagesToShow = activeChatUser.isGroup ?
+        allMessages.filter(m => m.groupId === activeChatUser.uid) :
+        allMessages.filter(m => (m.senderId === auth.currentUser.uid && m.receiverId === activeChatUser.uid) || (m.senderId === activeChatUser.uid && m.receiverId === auth.currentUser.uid));
+
+    messagesToShow.forEach(msg => {
+        const el = document.createElement('div');
+        const isMine = msg.senderId === auth.currentUser.uid;
+        el.className = `message ${isMine ? 'sent' : 'received'}`;
+        el.dataset.id = msg.id;
+
+        // Is message deleted?
+        if (msg.isDeleted) {
+            el.innerHTML = `<span class="deleted-msg"><i class="fas fa-ban"></i> Este mensaje fue eliminado</span>`;
+            chatMessages.appendChild(el);
+            return; // Skip normal rendering
+        }
+
+        let senderName = "";
+        if (activeChatUser.isGroup && !isMine) {
+            const sender = allUsers.find(u => u.uid === msg.senderId);
+            // V3 FIX: escape sender name before inserting into innerHTML
+            const safeName = escapeHtml(sender ? sender.name : 'Unknown');
+            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${safeName}</div>`;
+        }
+        
+        // Render Reply Context
+        let replyHtml = '';
+        if (msg.replyTo) {
+            // V3 FIX: escape reply author name and text before inserting into innerHTML
+            const safeReplySender = escapeHtml(msg.replyTo.senderName);
+            const safeReplyText = escapeHtml(msg.replyTo.text);
+            replyHtml = `
+            <div class="reply-preview">
+                <span class="reply-sender">${safeReplySender}</span>
+                <div class="reply-text">${safeReplyText}</div>
+            </div>`;
+        }
+        
+        // Render Edited Tag
+        const editedHtml = msg.isEdited ? `<span class="edited-tag">(editado)</span>` : '';
+
+        // Options Menu (Only for my messages)
+        let optionsHtml = '';
+        if (isMine && msg.type === 'text') {
+            optionsHtml = `
+            <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+            <div class="options-menu" id="options-${msg.id}">
+                <div class="options-menu-item" onclick="startEditingMessage('${msg.id}')"><i class="fas fa-pen"></i> Editar</div>
+                <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Eliminar para todos</div>
+            </div>
+            `;
+        } else if (isMine) { // non-text but mine
+             optionsHtml = `
+            <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
+            <div class="options-menu" id="options-${msg.id}">
+                <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Eliminar para todos</div>
+            </div>
+            `;
+        }
+
+        if (msg.type === 'call') {
+            // 'call' messages use fixed text generated by the app, no user input.
+            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${escapeHtml(msg.text)}<span class="time">${msg.time}</span>`;
+            el.style.backgroundColor = 'var(--primary)';
+            el.style.cursor = 'pointer';
+            el.onclick = () => {
+                const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
+                startCall(msg.audioOnly || false, true, caller);
+            };
+        } else if (msg.type === 'audio') {
+            // V10 FIX: Use safe URL from Storage and avoid XSS in attributes
+            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
+            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'image') {
+           const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
+           el.innerHTML = `${replyHtml}${senderName}<img src="${escapeHtml(safeImgUrl)}" style="max-width:100%; border-radius:10px; cursor:pointer;" onclick="window.open('${escapeHtml(safeImgUrl)}', '_blank')"><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else if (msg.type === 'file') {
+           const safeFileUrl = msg.text.startsWith('https://') ? msg.text : '';
+           el.innerHTML = `${replyHtml}${senderName}<div class="file-attachment"><i class="fas fa-file-alt"></i> <a href="${escapeHtml(safeFileUrl)}" target="_blank" style="color:white; text-decoration:underline;">Ver archivo adjunto</a></div><span class="time">${msg.time}</span>${optionsHtml}`;
+        } else {
+            // V3 FIX: text messages from users MUST be escaped to prevent XSS.
+            const safeText = escapeHtml(msg.text);
+            el.innerHTML = `${replyHtml}${senderName}${safeText}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
+        }
+        
+        // Touch events for Swipe to Reply
+        let touchStartX = 0;
+        let touchEndX = 0;
+        
+        el.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, {passive: true});
+        
+        el.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipeReply();
+        }, {passive: true});
+        
+        function handleSwipeReply() {
+            // Swipe right (> 40px)
+            if (touchEndX - touchStartX > 40) {
+                const userSource = isMine ? 'Tú' : (activeChatUser.isGroup ? (allUsers.find(u => u.uid === msg.senderId)?.name || 'Unknown') : activeChatUser.name);
+                let txt = msg.text;
+                if (msg.type === 'audio') txt = '🎵 Nota de voz';
+                else if (msg.type === 'call') txt = '📞 Llamada';
+                prepareReply(msg.id, userSource, txt);
+            }
+        }
+
+        chatMessages.appendChild(el);
+    });
+    setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
+}
+
+sendBtn.addEventListener('click', () => sendMessage());
+messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+messageInput.addEventListener('input', () => {
+    if (messageInput.value.trim().length > 0) {
+        sendBtn.style.display = 'flex';
+        voiceBtn.style.display = 'none';
+    } else {
+        sendBtn.style.display = 'none';
+        voiceBtn.style.display = 'flex';
+    }
+});
+
+async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
+    const text = overrideText || messageInput.value.trim();
+    if (!text || !activeChatUser) return;
+
+    // Profanity Check (sólo para texto)
+    if (type === 'text' && hasProfanity(text)) {
+        applyStrike();
+        return; // Stop message from being sent
+    }
+
+    // Note: Input is cleared only on successful send now to prevent data loss on error.
+
+    // Si estamos editando un mensaje existente y es de tipo texto
+    if (editingMessageId && type === 'text') {
+        try {
+            await db.collection("messages").doc(editingMessageId).update({
+                text: text,
+                isEdited: true
+            });
+            editingMessageId = null; // Reset
+            cancelReplyMode(); // Limpiar UI por si acaso
+        } catch (e) {
+            console.error("Error al editar mensaje:", e);
+        }
+        return;
+    }
+
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    // Preparar el mensaje nuevo
+    const messageData = {
+        senderId: auth.currentUser.uid,
+        text: text,
+        type: type,
+        audioOnly: audioOnly,
+        time: time,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        readBy: [auth.currentUser.uid] // Sender has already "read" it
+    };
+
+    // Agregar contexto de respuesta si existe
+    if (replyingToMessage) {
+        messageData.replyTo = replyingToMessage;
+        cancelReplyMode(); // Reset visual state
+    }
+
+    if (activeChatUser.isGroup) {
+        messageData.groupId = activeChatUser.uid;
+    } else {
+        messageData.receiverId = activeChatUser.uid;
+    }
+
+    try {
+        console.log("Intentando enviar mensaje:", messageData);
+        await db.collection("messages").add(messageData);
+        console.log("Mensaje enviado con éxito");
+        
+        // Clear input only on success
+        if (!overrideText) {
+            messageInput.value = '';
+            messageInput.dispatchEvent(new Event('input'));
+        }
+    } catch (e) {
+        console.error("Error completo al enviar mensaje:", e);
+        // Mostrar error detallado para facilitar el diagnóstico
+        let errorMsg = "Error al enviar el mensaje.\n";
+        if (e.code === 'permission-denied') {
+            errorMsg += "❌ Sin permisos en Firestore. Comprueba que tu sesión sigue activa y que las reglas de seguridad permiten escribir mensajes.";
+        } else if (e.code === 'unauthenticated') {
+            errorMsg += "❌ No estás autenticado. Por favor, cierra sesión y vuelve a entrar.";
+        } else if (e.code === 'unavailable') {
+            errorMsg += "❌ Sin conexión a internet. Comprueba tu red e inténtalo de nuevo.";
+        } else {
+            errorMsg += "Código: " + (e.code || 'desconocido') + "\nDetalle: " + e.message;
+        }
+        alert(errorMsg);
+    }
+}
+
+// Global click to close options menu
+document.addEventListener('click', () => {
+    document.querySelectorAll('.options-menu').forEach(m => m.classList.remove('active'));
+});
+
+// UI helpers para responder/editar/borrar
+window.toggleMessageOptions = function(msgId, event) {
+    event.stopPropagation();
+    document.querySelectorAll('.options-menu').forEach(m => {
+        if (m.id !== `options-${msgId}`) m.classList.remove('active');
+    });
+    const menu = document.getElementById(`options-${msgId}`);
+    if (menu) menu.classList.toggle('active');
+};
+
+window.deleteMessage = async function(msgId) {
+    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
+    try {
+        await db.collection("messages").doc(msgId).update({
+            isDeleted: true,
+            text: ""
+        });
+    } catch(e) { console.error("Error eliminando mensaje:", e); }
+};
+
+window.startEditingMessage = function(msgId) {
+    const msg = allMessages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    editingMessageId = msgId;
+    messageInput.value = msg.text;
+    messageInput.focus();
+    // Reutilizamos la caja de reply visual para notificar que estamos editando
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = "Editando mensaje...";
+    document.getElementById('reply-text-preview').textContent = msg.text;
+    replyBox.classList.add('active');
+};
+
+function prepareReply(msgId, senderName, text) {
+    editingMessageId = null; // Can't edit and reply at the same time
+    replyingToMessage = { id: msgId, senderName, text };
+    
+    const replyBox = document.getElementById('reply-box-input');
+    document.getElementById('reply-sender-name').textContent = `Responder a ${senderName}`;
+    document.getElementById('reply-text-preview').textContent = text;
+    replyBox.classList.add('active');
+    messageInput.focus();
+}
+
+const btnCloseReply = document.getElementById('btn-close-reply');
+if(btnCloseReply) {
+    btnCloseReply.addEventListener('click', cancelReplyMode);
+}
+
+function cancelReplyMode() {
+    replyingToMessage = null;
+    if(editingMessageId) {
+        editingMessageId = null;
+        messageInput.value = '';
+    }
+    const replyBox = document.getElementById('reply-box-input');
+    if (replyBox) replyBox.classList.remove('active');
+}
+
+// Voice recording logic has been migrated to the top of the file
+
+// --- Unread / Read Logic ---
+
+function markMessagesAsRead(entity) {
+    if (!auth.currentUser || !entity) return;
+    const uid = auth.currentUser.uid;
+
+    const unread = allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid && m.senderId !== uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        return isForMe;
+    });
+
+    if (unread.length === 0) return;
+
+    // Marcar en el Set local INMEDIATAMENTE — nunca se borra aunque Firestore tarde
+    unread.forEach(m => readMessageIds.add(m.id));
+    renderContacts(); // Badge desaparece al instante
+
+    // Persistir en Firestore en segundo plano
+    const batch = db.batch();
+    unread.forEach(m => {
+        batch.update(db.collection("messages").doc(m.id), {
+            readBy: firebase.firestore.FieldValue.arrayUnion(uid)
+        });
+    });
+    batch.commit().catch(e => console.error("Error marking as read:", e));
+}
+
+function getUnreadCount(entity) {
+    if (!auth.currentUser) return 0;
+    const uid = auth.currentUser.uid;
+
+    return allMessages.filter(m => {
+        if (readMessageIds.has(m.id)) return false;
+        if (m.senderId === uid) return false;
+        const isForMe = entity.isGroup
+            ? (m.groupId === entity.uid)
+            : (m.receiverId === uid && m.senderId === entity.uid);
+        // Considerar leídos los que ya tienen nuestro uid en readBy (de sesiones anteriores)
+        const alreadyRead = m.readBy && m.readBy.includes(uid);
+        return isForMe && !alreadyRead;
+    }).length;
+}
+
 // --- Group Management Logic ---
+
 btnNewGroup.addEventListener('click', () => {
     groupModal.classList.add('active');
     renderMemberSelection();
@@ -415,7 +1852,7 @@ btnDialpadCall.addEventListener('click', async () => {
             return;
         }
 
-        // We search in allUsers to get the full entity object
+        // We search in allUsers to ge the full entity object
         const entity = allUsers.find(u => u.phoneNumber === currentDialedNumber);
 
         if (entity) {
@@ -429,6 +1866,31 @@ btnDialpadCall.addEventListener('click', async () => {
         dialpadError.textContent = "Error en la búsqueda";
     }
 });
+
+function openChatWith(entity) {
+    activeChatUser = entity;
+    const items = document.querySelectorAll('.contact-item');
+    items.forEach(el => el.classList.remove('active'));
+
+    activeContactName.textContent = entity.isGroup ? entity.name : getDisplayName(entity);
+    const avatar = entity.isGroup ?
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
+    activeContactImg.src = avatar;
+
+    chatHeaderInfo.classList.add('active');
+    chatHeaderText.classList.add('active');
+    welcomeMessage.style.display = 'none';
+    chatInputArea.style.display = 'flex';
+
+    updateHeaderStatus();
+    renderMessages();
+    markMessagesAsRead(entity);
+
+    if (window.innerWidth <= 768) {
+        appContainer.classList.add('show-chat');
+    }
+}
 
 // --- Directory Logic ---
 btnOpenDirectory.addEventListener('click', () => {
@@ -513,6 +1975,15 @@ function renderDirectory(filter = "") {
     });
 }
 
+// Update openChatWith to show header actions
+const originalOpenChatWith = openChatWith;
+openChatWith = function (entity) {
+    originalOpenChatWith(entity);
+    const headerActions = document.getElementById('chat-header-actions');
+    if (headerActions) headerActions.style.display = 'flex';
+};
+
+
 // --- WhatsApp Features (v2.17) ---
 const emojiBtn = document.getElementById('emoji-btn');
 const attachBtn = document.getElementById('attach-btn');
@@ -526,7 +1997,6 @@ if (contactSearchInput) {
         renderContacts(e.target.value.toLowerCase());
     });
 }
-
 if (emojiBtn) {
     emojiBtn.addEventListener('click', () => {
         if (emojiPicker) {
@@ -569,6 +2039,7 @@ document.addEventListener('click', (e) => {
 if (attachBtn) {
     attachBtn.addEventListener('click', () => fileInput.click());
 }
+
 if (fileInput) {
     fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
@@ -623,1430 +2094,4 @@ btnSaveAlias.addEventListener('click', async () => {
         console.error("Error guardando alias:", e);
         alert("Error al guardar el alias. Inténtalo de nuevo.");
     }
-});
-
-// --- Admin Panel Logic ---
-btnAdminPanel.addEventListener('click', () => {
-    adminModal.classList.add('active');
-    resetAdminForm();
-    renderAdminUserList();
-});
-
-closeAdminModal.addEventListener('click', () => adminModal.classList.remove('active'));
-
-function resetAdminForm() {
-    editingUserId = null;
-    adminFormTitle.textContent = "Crear Nuevo Usuario";
-    adminFormSubmit.textContent = "Registrar Usuario";
-    adminFormCancel.style.display = "none";
-    document.getElementById('new-user-email').disabled = false;
-    passwordContainer.style.display = "block";
-    newUserPassword.required = true;
-    newUserPassword.type = "password";
-    newUserPassword.placeholder = "Contraseña";
-    adminCreateForm.reset();
-
-    if (currentUserData.role === 'super_admin') {
-        optRoleAdmin.style.display = 'block';
-        optRoleSuperAdmin.style.display = 'block';
-    } else {
-        optRoleAdmin.style.display = 'none';
-        optRoleSuperAdmin.style.display = 'none';
-        document.getElementById('new-user-role').value = 'usuario';
-    }
-}
-
-adminFormCancel.addEventListener('click', resetAdminForm);
-
-function renderAdminUserList() {
-    adminUserList.innerHTML = '';
-    const allRegistered = [currentUserData, ...allUsers];
-
-    allRegistered.forEach(user => {
-        const item = document.createElement('div');
-        item.className = 'admin-user-item';
-        const roleClass = `role-${user.role}`;
-        const isSelf = user.uid === auth.currentUser.uid;
-        const isSuperAdmin = currentUserData.role === 'super_admin';
-        const targetIsSuperAdmin = user.role === 'super_admin';
-        const isDisabled = user.disabled === true;
-
-        let actions = `<div class="user-actions">`;
-
-        // Editar: solo super_admin puede editar a cualquiera
-        if (isSuperAdmin) {
-            actions += `<i class="fas fa-edit" onclick="startEditUser('${user.uid}')" style="color: var(--primary);" title="Editar"></i>`;
-        }
-
-        // Encender/Apagar: solo super_admin, no puede apagarse a sí mismo ni a otros super_admin
-        if (isSuperAdmin && !isSelf && !targetIsSuperAdmin) {
-            const powerColor = isDisabled ? '#22c55e' : '#f43f5e';
-            const powerIcon = isDisabled ? 'fa-toggle-on' : 'fa-toggle-off';
-            const powerTitle = isDisabled ? 'Activar usuario' : 'Desactivar usuario';
-            actions += `<i class="fas ${powerIcon}" onclick="toggleUserDisabled('${user.uid}', ${isDisabled})" style="color: ${powerColor}; font-size: 20px;" title="${powerTitle}"></i>`;
-        }
-
-        // Borrar y resetear strikes: solo super_admin, no puede borrarse a sí mismo
-        if (isSuperAdmin && !isSelf) {
-            actions += `<i class="fas fa-trash-alt" onclick="deleteUser('${user.uid}')" style="color: #f43f5e;" title="Borrar"></i>`;
-            if (user.strikes > 0 || user.banUntil) {
-                actions += `<i class="fas fa-undo" onclick="resetStrikes('${user.uid}')" style="color: #10b981;" title="Resetear Faltas"></i>`;
-            }
-        }
-
-        actions += `</div>`;
-
-        const disabledBadge = isDisabled ? `<span class="role-badge" style="background:#f43f5e;">desactivado</span>` : '';
-        item.innerHTML = `
-            <div>
-                <strong>${user.name}</strong> <span style="font-size:12px;color:var(--text-secondary)">(${user.email})</span>
-                <span class="role-badge ${roleClass}">${user.role}</span>
-                ${disabledBadge}
-            </div>
-            ${actions}
-        `;
-        if (isDisabled) item.style.opacity = '0.5';
-        adminUserList.appendChild(item);
-    });
-}
-
-// --- Chat Listeners ---
-function setupUsersListener() {
-    unsubscribeUsers = db.collection("users").onSnapshot((snapshot) => {
-        allUsers = [];
-        snapshot.forEach(doc => {
-            if (doc.id !== auth.currentUser.uid) {
-                allUsers.push({ uid: doc.id, ...doc.data() });
-            } else {
-                currentUserData = { uid: doc.id, ...doc.data() };
-            }
-        });
-        renderContacts();
-        setupGroupsListener(); // Refresh groups too
-        if (activeChatUser && !activeChatUser.isGroup) {
-            const updatedActive = allUsers.find(u => u.uid === activeChatUser.uid);
-            if (updatedActive) {
-                activeChatUser = updatedActive;
-                updateHeaderStatus();
-            }
-        }
-        if (adminModal.classList.contains('active')) renderAdminUserList();
-    });
-}
-
-function setupGroupsListener() {
-    if (unsubscribeGroups) unsubscribeGroups();
-    unsubscribeGroups = db.collection("groups")
-        .where("members", "array-contains", auth.currentUser.uid)
-        .onSnapshot((snapshot) => {
-            allGroups = [];
-            snapshot.forEach(doc => {
-                allGroups.push({ uid: doc.id, ...doc.data(), isGroup: true });
-            });
-            renderContacts();
-            if (activeChatUser && activeChatUser.isGroup) {
-                const updatedActive = allGroups.find(g => g.uid === activeChatUser.uid);
-                if (updatedActive) {
-                    activeChatUser = updatedActive;
-                    updateHeaderStatus();
-                }
-            }
-        });
-}
-
-// --- UI Helpers ---
-function updateHeaderStatus() {
-    if (!activeChatUser) return;
-
-    if (activeChatUser.isGroup) {
-        chatStatus.textContent = `${activeChatUser.members.length} miembros`;
-        chatStatus.classList.remove('online');
-        return;
-    }
-
-    if (activeChatUser.status === "online") {
-        chatStatus.innerHTML = `<span class="status-dot"></span> en línea`;
-        chatStatus.classList.add('online');
-    } else {
-        chatStatus.classList.remove('online');
-        if (activeChatUser.lastSeen) {
-            const date = activeChatUser.lastSeen.toDate();
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-
-            let timeStr;
-            if (diffMins < 1) {
-                timeStr = 'hace un momento';
-            } else {
-                const hh = date.getHours().toString().padStart(2, '0');
-                const mm = date.getMinutes().toString().padStart(2, '0');
-                const isToday = date.toDateString() === now.toDateString();
-                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-                const isYesterday = date.toDateString() === yesterday.toDateString();
-
-                if (isToday) timeStr = `hoy a las ${hh}:${mm}`;
-                else if (isYesterday) timeStr = `ayer a las ${hh}:${mm}`;
-                else timeStr = `${date.getDate()}/${date.getMonth() + 1} a las ${hh}:${mm}`;
-            }
-            chatStatus.textContent = `última vez ${timeStr}`;
-        } else {
-            chatStatus.textContent = 'desconectado';
-        }
-    }
-}
-
-function renderContacts(filter = '') {
-    contactList.innerHTML = '';
-
-    // Merge Users and Groups
-    let combined = [...allGroups, ...allUsers];
-
-    // Filter by name (only show if filter is provided, or if they are pinned)
-    const pinnedIds = currentUserData && currentUserData.pinnedChats ? currentUserData.pinnedChats : [];
-
-    // Only keep those matching filter, OR those that are pinned
-    combined = combined.filter(u => {
-        const isPinned = pinnedIds.includes(u.uid);
-        if (isPinned) return true; // always show pinned
-
-        // If there's a search filter, show matches
-        if (filter) {
-            const nameToSearch = u.isGroup ? u.name : getDisplayName(u);
-            return nameToSearch.toLowerCase().includes(filter);
-        }
-
-        // WhatsApp-like: show if it has at least one message (recent conversations)
-        return getLatestTimestamp(u) > 0;
-    });
-
-    // Helper to get the latest message timestamp for an entity
-    function getLatestTimestamp(entity) {
-        if (!auth.currentUser) return 0;
-        const isGroup = entity.isGroup;
-        const chatNotes = allMessages.filter(m =>
-            isGroup ? (m.groupId === entity.uid) : ((m.senderId === auth.currentUser.uid && m.receiverId === entity.uid) || (m.senderId === entity.uid && m.receiverId === auth.currentUser.uid))
-        );
-        if (chatNotes.length > 0) {
-            const last = chatNotes[chatNotes.length - 1];
-            return typeof last.timestamp === 'function' ? last.timestamp.toMillis() : Date.now();
-        }
-        return 0;
-    }
-
-    // Sorting Logic: Pinned first, then by last message time
-    combined.sort((a, b) => {
-        const aPinned = pinnedIds.includes(a.uid);
-        const bPinned = pinnedIds.includes(b.uid);
-
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-
-        // If both pinned or both unpinned, sort by newest message (descending)
-        return getLatestTimestamp(b) - getLatestTimestamp(a);
-    });
-
-    combined.forEach(entity => {
-        const isGroup = entity.isGroup;
-        const isPinned = pinnedIds.includes(entity.uid);
-        const isSelf = entity.uid === auth.currentUser.uid;
-
-        const item = document.createElement('div');
-        item.className = `contact-item${isPinned ? ' pinned' : ''}`;
-        if (activeChatUser && activeChatUser.uid === entity.uid) item.classList.add('active');
-
-        const avatar = isGroup ?
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-            `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
-
-        const indicator = (!isGroup && entity.status === "online") ? '<div class="online-indicator"></div>' : '';
-        const roleClass = `role-${entity.role}`;
-        const entityDisplayName = escapeHtml(isGroup ? entity.name : getDisplayName(entity));
-        const safeRole = escapeHtml(entity.role || '');
-
-        const badge = !isGroup && entity.role ? `<span class="role-badge ${roleClass}">${safeRole}</span>` : '';
-
-        const unreadCount = getUnreadCount(entity);
-        const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
-
-        item.innerHTML = `
-            ${indicator}
-            <img src="${avatar}">
-            <div class="contact-info">
-                <div class="contact-name-time">
-                    <span class="contact-name">${entityDisplayName} ${badge}</span>
-                    <div style="display: flex; align-items: center;">
-                        <span class="contact-time"></span>
-                        <i class="fas fa-thumbtack btn-pin ${isPinned ? 'active' : ''}" data-id="${entity.uid}" title="${isPinned ? 'Desfijar' : 'Fijar'} chat"></i>
-                    </div>
-                </div>
-                <div class="contact-message-row">
-                    <div class="contact-message"></div>
-                    ${unreadBadge}
-                </div>
-            </div>
-        `;
-
-        // Update last message preview and time
-        const lastMsg = getLastMessage(entity);
-        const msgPreview = item.querySelector('.contact-message');
-        const timeEl = item.querySelector('.contact-time');
-        if (lastMsg) {
-            msgPreview.textContent = formatMessagePreview(lastMsg);
-            timeEl.textContent = formatTimestamp(lastMsg.timestamp);
-        }
-
-        // Pin toggle
-        const pinBtn = item.querySelector('.btn-pin');
-        pinBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            togglePin(entity.uid);
-        });
-
-        item.addEventListener('click', () => {
-            activeChatUser = entity;
-            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
-            item.classList.add('active');
-            openChatWith(entity);
-        });
-
-        contactList.appendChild(item);
-    });
-}
-
-// Helper functions used above
-function getDisplayName(user) {
-    return (user && user.alias && user.alias.trim()) ? user.alias.trim() : user.name;
-}
-
-function getLastMessage(entity) {
-    const uid = auth.currentUser.uid;
-    if (entity.isGroup) {
-        const msgs = allMessages.filter(m => m.groupId === entity.uid);
-        return msgs.length ? msgs[msgs.length - 1] : null;
-    } else {
-        const msgs = allMessages.filter(m =>
-            (m.senderId === uid && m.receiverId === entity.uid) ||
-            (m.senderId === entity.uid && m.receiverId === uid)
-        );
-        return msgs.length ? msgs[msgs.length - 1] : null;
-    }
-}
-
-function formatMessagePreview(msg) {
-    if (!msg) return '';
-    if (msg.type === 'call') return '📞 Llamada';
-    if (msg.type === 'image') return '📷 Imagen';
-    if (msg.type === 'file') return '📎 Archivo';
-    if (msg.type === 'audio') return '🎧 Audio';
-    return msg.text.length > 30 ? msg.text.substring(0, 30) + '...' : msg.text;
-}
-
-function formatTimestamp(ts) {
-    if (!ts) return '';
-    const date = ts.toDate ? ts.toDate() : new Date(ts);
-    const now = new Date();
-    const diff = now - date;
-    const diffMins = Math.floor(diff / 60000);
-    if (diffMins < 1) return 'Ahora';
-    if (diffMins < 60) return `${diffMins}m`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d`;
-}
-
-// --- Unread / Read Logic ---
-function markMessagesAsRead(entity) {
-    if (!auth.currentUser || !entity) return;
-    const uid = auth.currentUser.uid;
-
-    const unread = allMessages.filter(m => {
-        if (readMessageIds.has(m.id)) return false;
-        const isForMe = entity.isGroup
-            ? (m.groupId === entity.uid && m.senderId !== uid)
-            : (m.receiverId === uid && m.senderId === entity.uid);
-        return isForMe;
-    });
-
-    if (unread.length === 0) return;
-
-    // Marcar en el Set local INMEDIATAMENTE — nunca se borra aunque Firestore tarde
-    unread.forEach(m => readMessageIds.add(m.id));
-    renderContacts(); // Badge desaparece al instante
-
-    // Persistir en Firestore en segundo plano
-    const batch = db.batch();
-    unread.forEach(m => {
-        batch.update(db.collection("messages").doc(m.id), {
-            readBy: firebase.firestore.FieldValue.arrayUnion(uid)
-        });
-    });
-    batch.commit().catch(e => console.error("Error marking as read:", e));
-}
-
-function getUnreadCount(entity) {
-    if (!auth.currentUser) return 0;
-    const uid = auth.currentUser.uid;
-
-    return allMessages.filter(m => {
-        if (readMessageIds.has(m.id)) return false;
-        if (m.senderId === uid) return false;
-        const isForMe = entity.isGroup
-            ? (m.groupId === entity.uid)
-            : (m.receiverId === uid && m.senderId === entity.uid);
-        // Considerar leídos los que ya tienen nuestro uid en readBy (de sesiones anteriores)
-        const alreadyRead = m.readBy && m.readBy.includes(uid);
-        return isForMe && !alreadyRead;
-    }).length;
-}
-
-// --- Messaging ---
-function renderMessages() {
-    Array.from(chatMessages.children).forEach(c => { if (c.id !== 'welcome-message') c.remove(); });
-    if (!activeChatUser) return;
-
-    const messagesToShow = activeChatUser.isGroup
-        ? allMessages.filter(m => m.groupId === activeChatUser.uid)
-        : allMessages.filter(m => (m.senderId === auth.currentUser.uid && m.receiverId === activeChatUser.uid) || (m.senderId === activeChatUser.uid && m.receiverId === auth.currentUser.uid));
-
-    messagesToShow.forEach(msg => {
-        const el = document.createElement('div');
-        const isMine = msg.senderId === auth.currentUser.uid;
-        el.className = `message ${isMine ? 'sent' : 'received'}`;
-        el.dataset.id = msg.id;
-
-        // Mensaje borrado
-        if (msg.isDeleted) {
-            el.innerHTML = `<span class="deleted-msg"><i class="fas fa-ban"></i> Este mensaje fue eliminado</span>`;
-            chatMessages.appendChild(el);
-            return;
-        }
-
-        let senderName = "";
-        if (activeChatUser.isGroup && !isMine) {
-            const sender = allUsers.find(u => u.uid === msg.senderId);
-            const safeName = escapeHtml(sender ? sender.name : 'Unknown');
-            senderName = `<div style="font-size: 10px; color: var(--primary); font-weight: bold; margin-bottom: 4px;">${safeName}</div>`;
-        }
-
-        // Reply preview
-        let replyHtml = '';
-        if (msg.replyTo) {
-            const safeReplySender = escapeHtml(msg.replyTo.senderName);
-            const safeReplyText = escapeHtml(msg.replyTo.text);
-            replyHtml = `
-                <div class="reply-preview">
-                    <span class="reply-sender">${safeReplySender}</span>
-                    <div class="reply-text">${safeReplyText}</div>
-                </div>`;
-        }
-
-        // Edited tag
-        const editedHtml = msg.isEdited ? `<span class="edited-tag">(editado)</span>` : '';
-
-        // Options menu (solo para mis mensajes)
-        let optionsHtml = '';
-        if (isMine && msg.type === 'text') {
-            optionsHtml = `
-                <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
-                <div class="options-menu" id="options-${msg.id}">
-                    <div class="options-menu-item" onclick="startEditingMessage('${msg.id}')"><i class="fas fa-pen"></i> Editar</div>
-                    <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Borrar para todos</div>
-                </div>`;
-        } else if (isMine) {
-            optionsHtml = `
-                <i class="fas fa-chevron-down message-options-btn" onclick="toggleMessageOptions('${msg.id}', event)"></i>
-                <div class="options-menu" id="options-${msg.id}">
-                    <div class="options-menu-item danger" onclick="deleteMessage('${msg.id}')"><i class="fas fa-trash"></i> Borrar para todos</div>
-                </div>`;
-        }
-
-        // Render según tipo
-        if (msg.type === 'call') {
-            el.innerHTML = `${senderName}<i class="fas fa-video" style="margin-right:8px;"></i> ${escapeHtml(msg.text)}<span class="time">${msg.time}</span>`;
-            el.style.backgroundColor = 'var(--primary)';
-            el.style.cursor = 'pointer';
-            el.onclick = () => {
-                const caller = allUsers.find(u => u.uid === msg.senderId) || currentUserData;
-                startCall(msg.audioOnly || false, true, caller);
-            };
-        } else if (msg.type === 'audio') {
-            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
-            el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
-        } else if (msg.type === 'image') {
-            const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
-            el.innerHTML = `${replyHtml}${senderName}<img src="${escapeHtml(safeImgUrl)}" style="max-width:100%; border-radius:10px; cursor:pointer;" onclick="window.open('${escapeHtml(safeImgUrl)}', '_blank')"><span class="time">${msg.time}</span>${optionsHtml}`;
-        } else if (msg.type === 'file') {
-            const safeFileUrl = msg.text.startsWith('https://') ? msg.text : '';
-            el.innerHTML = `${replyHtml}${senderName}<div class="file-attachment"><i class="fas fa-file-alt"></i> <a href="${escapeHtml(safeFileUrl)}" target="_blank" style="color:white; text-decoration:underline;">Ver archivo adjunto</a></div><span class="time">${msg.time}</span>${optionsHtml}`;
-        } else {
-            const safeText = escapeHtml(msg.text);
-            el.innerHTML = `${replyHtml}${senderName}${safeText}${editedHtml}<span class="time">${msg.time}</span>${optionsHtml}`;
-        }
-
-        // Swipe to reply (touch)
-        let touchStartX = 0;
-        let touchEndX = 0;
-
-        el.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
-        el.addEventListener('touchend', e => { touchEndX = e.changedTouches[0].screenX; handleSwipeReply(); }, { passive: true });
-
-        function handleSwipeReply() {
-            // Swipe right (> 40px)
-            if (touchEndX - touchStartX > 40) {
-                const userSource = isMine ? 'Tú' : (activeChatUser.isGroup ? (allUsers.find(u => u.uid === msg.senderId)?.name || 'Unknown') : activeChatUser.name);
-                let txt = msg.text;
-                if (msg.type === 'audio') txt = '🎵 Nota de voz';
-                else if (msg.type === 'call') txt = '📞 Llamada';
-                prepareReply(msg.id, userSource, txt);
-            }
-        }
-
-        chatMessages.appendChild(el);
-    });
-    setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
-}
-
-function toggleMessageOptions(msgId, event) {
-    event.stopPropagation();
-    document.querySelectorAll('.options-menu').forEach(m => { if (m.id !== `options-${msgId}`) m.classList.remove('active'); });
-    const menu = document.getElementById(`options-${msgId}`);
-    if (menu) menu.classList.toggle('active');
-}
-
-function deleteMessage(msgId) {
-    if (!confirm("¿Deseas eliminar este mensaje para todos?")) return;
-    db.collection("messages").doc(msgId).update({
-        isDeleted: true,
-        text: ""
-    }).catch(err => console.error("Error borrando mensaje:", err));
-}
-
-function startEditingMessage(msgId) {
-    const msg = allMessages.find(m => m.id === msgId);
-    if (!msg) return;
-    editingMessageId = msgId;
-    messageInput.value = msg.text;
-    messageInput.focus();
-    const replyBox = document.getElementById('reply-box-input');
-    document.getElementById('reply-sender-name').textContent = "Editando mensaje...";
-    document.getElementById('reply-text-preview').textContent = msg.text;
-    replyBox.classList.add('active');
-}
-
-// Reply handling
-function prepareReply(msgId, senderName, text) {
-    editingMessageId = null; // Cannot edit and reply at the same time
-    replyingToMessage = { id: msgId, senderName, text };
-    const replyBox = document.getElementById('reply-box-input');
-    document.getElementById('reply-sender-name').textContent = `Responder a ${senderName}`;
-    document.getElementById('reply-text-preview').textContent = text;
-    replyBox.classList.add('active');
-    messageInput.focus();
-}
-
-const btnCloseReply = document.getElementById('btn-close-reply');
-if (btnCloseReply) {
-    btnCloseReply.addEventListener('click', cancelReplyMode);
-}
-
-function cancelReplyMode() {
-    replyingToMessage = null;
-    if (editingMessageId) {
-        editingMessageId = null;
-        messageInput.value = '';
-    }
-    const replyBox = document.getElementById('reply-box-input');
-    if (replyBox) replyBox.classList.remove('active');
-}
-
-// --- Send Message ---
-async function sendMessage(overrideText = null, type = 'text', audioOnly = false) {
-    const text = overrideText || messageInput.value.trim();
-    if (!text || !activeChatUser) return;
-
-    // Profanity Check (solo para texto)
-    if (type === 'text' && hasProfanity(text)) {
-        applyStrike();
-        return; // Stop message from being sent
-    }
-
-    // Si estamos editando un mensaje existente y es de tipo texto
-    if (editingMessageId && type === 'text') {
-        try {
-            await db.collection("messages").doc(editingMessageId).update({
-                text: text,
-                isEdited: true
-            });
-            editingMessageId = null; // Reset
-            cancelReplyMode(); // Limpiar UI por si acaso
-        } catch (e) {
-            console.error("Error al editar mensaje:", e);
-        }
-        return;
-    }
-
-    const now = new Date();
-    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-    // Preparar el mensaje nuevo
-    const messageData = {
-        senderId: auth.currentUser.uid,
-        text: text,
-        type: type,
-        audioOnly: audioOnly,
-        time: time,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-        readBy: [auth.currentUser.uid] // Sender has already "read" it
-    };
-
-    // Agregar contexto de respuesta si existe
-    if (replyingToMessage) {
-        messageData.replyTo = replyingToMessage;
-        cancelReplyMode(); // Reset visual state
-    }
-
-    if (activeChatUser.isGroup) {
-        messageData.groupId = activeChatUser.uid;
-    } else {
-        messageData.receiverId = activeChatUser.uid;
-    }
-
-    try {
-        console.log("Intentando enviar mensaje:", messageData);
-        await db.collection("messages").add(messageData);
-        console.log("Mensaje enviado con éxito");
-
-        // Clear input only on success
-        if (!overrideText) {
-            messageInput.value = '';
-            messageInput.dispatchEvent(new Event('input'));
-        }
-    } catch (e) {
-        console.error("Error completo al enviar mensaje:", e);
-        // Mostrar error detallado para facilitar el diagnóstico
-        let errorMsg = "Error al enviar el mensaje.\n";
-        if (e.code === 'permission-denied') {
-            errorMsg += "❌ Sin permisos en Firestore. Comprueba que tu sesión sigue activa y que las reglas de seguridad permiten escribir mensajes.";
-        } else if (e.code === 'unauthenticated') {
-            errorMsg += "❌ No estás autenticado. Por favor, cierra sesión y vuelve a entrar.";
-        } else if (e.code === 'unavailable') {
-            errorMsg += "❌ Sin conexión a internet. Comprueba tu red e inténtalo de nuevo.";
-        } else {
-            errorMsg += "Código: " + (e.code || 'desconocido') + "\nDetalle: " + e.message;
-        }
-        alert(errorMsg);
-    }
-}
-
-// Global click to close options menu
-document.addEventListener('click', () => {
-    document.querySelectorAll('.options-menu').forEach(m => m.classList.remove('active'));
-});
-
-// UI helpers para responder/editar/borrar
-window.toggleMessageOptions = function(msgId, event) {
-    event.stopPropagation();
-    document.querySelectorAll('.options-menu').forEach(m => {
-        if (m.id !== `options-${msgId}`) m.classList.remove('active');
-    });
-    const menu = document.getElementById(`options-${msgId}`);
-    if (menu) menu.classList.toggle('active');
-};
-
-window.deleteMessage = async function(msgId) {
-    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
-    try {
-        await db.collection("messages").doc(msgId).update({
-            isDeleted: true,
-            text: ""
-        });
-    } catch (e) {
-        console.error("Error al borrar mensaje:", e);
-    }
-};
-
-window.toggleUserDisabled = async (uid, currentlyDisabled) => {
-    const action = currentlyDisabled ? 'activar' : 'desactivar';
-    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
-    try {
-        await db.collection("users").doc(uid).update({
-            disabled: !currentlyDisabled
-        });
-        renderAdminUserList();
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-window.resetStrikes = async (uid) => {
-    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
-    try {
-        await db.collection("users").doc(uid).update({
-            strikes: 0,
-            banUntil: null
-        });
-        alert("Faltas reseteadas con éxito.");
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-window.startEditUser = (uid) => {
-    const user = [currentUserData, ...allUsers].find(u => u.uid === uid);
-    if (!user) return;
-
-    editingUserId = uid;
-    adminFormTitle.textContent = "Editando: " + user.name;
-    adminFormSubmit.textContent = "Guardar Cambios";
-    adminFormCancel.style.display = "block";
-
-    document.getElementById('new-user-name').value = user.name;
-    document.getElementById('new-user-email').value = user.email;
-    document.getElementById('new-user-email').disabled = true;
-    document.getElementById('new-user-role').value = user.role;
-
-    // V2 FIX: Never display or load stored passwords.
-    // Passwords are managed exclusively by Firebase Auth.
-    passwordContainer.style.display = "none";
-    newUserPassword.required = false;
-    newUserPassword.value = "";
-};
-
-window.deleteUser = async (uid) => {
-    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
-    try {
-        // 1. Delete Firestore document
-        await db.collection("users").doc(uid).delete();
-
-        // 2. Attempt to delete from Firebase Auth via Cloud Function
-        // Requires a deployed Cloud Function named 'deleteAuthUser'
-        try {
-            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
-            if (deleteAuthUser) {
-                await deleteAuthUser({ uid });
-            } else {
-                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
-            }
-        } catch (fnErr) {
-            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
-        }
-
-        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-adminCreateForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = document.getElementById('new-user-name').value.trim();
-    const email = document.getElementById('new-user-email').value.trim();
-    const password = newUserPassword.value;
-    const role = document.getElementById('new-user-role').value;
-
-    try {
-        if (editingUserId) {
-            // V2 FIX: Only update name and role — never store or touch passwords.
-            const updateData = { name: name, role: role };
-            await db.collection("users").doc(editingUserId).update(updateData);
-            alert("Usuario actualizado");
-        } else {
-            // V9 FIX: Use the primary auth instance. Save admin credentials
-            // to restore the session after creating the new user account.
-            const adminEmail = auth.currentUser.email;
-            const adminPasswordInput = prompt(
-                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
-            );
-            if (!adminPasswordInput) return;
-
-            // Create the new user (this signs us out of the admin session)
-            const cred = await auth.createUserWithEmailAndPassword(email, password);
-            const newUid = cred.user.uid;
-
-            // V2 FIX: Never store the password in Firestore.
-            await db.collection("users").doc(newUid).set({
-                uid: newUid,
-                email: email,
-                name: name,
-                role: role,
-                status: "offline",
-                phoneNumber: await generateUniquePhoneNumber(),
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            // Sign out the newly created user and restore the admin session
-            await auth.signOut();
-            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
-            alert("Usuario registrado: " + email);
-        }
-        resetAdminForm();
-    } catch (err) {
-        console.error("Error completo en Admin Panel:", err);
-        if (err.code === 'auth/too-many-requests') {
-            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
-        } else {
-            alert("Error: " + err.message);
-        }
-    }
-});
-
-function togglePin(entityId) {
-    if (!currentUserData) return;
-
-    let pinned = currentUserData.pinnedChats || [];
-    if (pinned.includes(entityId)) {
-        pinned = pinned.filter(id => id !== entityId);
-    } else {
-        pinned.push(entityId);
-    }
-
-    db.collection("users").doc(auth.currentUser.uid).update({ pinnedChats: pinned })
-        .catch(e => console.error("Error toggling pin:", e));
-}
-
-// --- Call Logic ---
-btnVideoCall.addEventListener('click', () => startCall(false));
-btnVoiceCall.addEventListener('click', () => startCall(true));
-
-function startCall(audioOnly, isReceiver = false, remoteUser = null) {
-    const targetUser = isReceiver ? remoteUser : activeChatUser;
-    if (!targetUser) return;
-
-    // Verify Jitsi library availability
-    if (typeof JitsiMeetExternalAPI === 'undefined') {
-        alert("⚠️ Error: La librería de SEK-Time no se ha cargado correctamente. Por favor, recarga la página.");
-        console.error("JitsiMeetExternalAPI is not defined");
-        return;
-    }
-
-    callModal.classList.add('active');
-    incomingCallOverlay.classList.remove('active');
-    jitsiContainer.innerHTML = ''; // Clear previous calls
-
-    // Show loader
-    const loader = document.getElementById('jitsi-loader');
-    if (loader) loader.classList.remove('jitsi-hidden');
-
-    // Multi-stage safety nets for the loader
-    const loaderTimeoutFast = setTimeout(() => {
-        if (loader && !loader.classList.contains('jitsi-hidden')) {
-            console.warn("Jitsi: Connection taking longer than expected...");
-        }
-    }, 5000);
-
-    const loaderTimeoutFinal = setTimeout(() => {
-        if (loader) loader.classList.add('jitsi-hidden');
-        console.error("Jitsi: Connection timeout, hiding loader");
-    }, 15000);
-
-    try {
-        const domain = "meet.jit.si";
-        const ids = [auth.currentUser.uid, targetUser.uid].sort();
-        const roomName = `ChatSEK-${ids[0].substring(0, 8)}-${ids[1].substring(0, 8)}`;
-
-        const options = {
-            roomName: roomName,
-            width: '100%',
-            height: '100%',
-            parentNode: jitsiContainer,
-            userInfo: {
-                displayName: currentUserData.name
-            },
-            configOverwrite: {
-                prejoinPageEnabled: false,
-                prejoinConfig: { enabled: false },
-                startWithAudioMuted: false,
-                startWithVideoMuted: audioOnly,
-                disableDeepLinking: true,
-                enableWelcomePage: false,
-                enableClosePage: false
-            },
-            interfaceConfigOverwrite: {
-                SHOW_JITSI_WATERMARK: false,
-                DEFAULT_REMOTE_DISPLAY_NAME: 'Usuario SEK',
-                TOOLBAR_BUTTONS: [
-                    'microphone', 'camera', 'desktop', 'fullscreen',
-                    'fodeviceselection', 'hangup', 'profile', 'chat', 'settings', 'tileview'
-                ]
-            }
-        };
-
-        jitsiApi = new JitsiMeetExternalAPI(domain, options);
-
-        jitsiApi.addEventListeners({
-            readyToClose: endCall,
-            videoConferenceLeft: endCall,
-            videoConferenceJoined: () => {
-                console.log("SEK-Time: Conexión establecida correctamente");
-                clearTimeout(loaderTimeoutFast);
-                clearTimeout(loaderTimeoutFinal);
-                if (loader) loader.classList.add('jitsi-hidden');
-            },
-            participantJoined: (event) => {
-                console.log("SEK-Time: Participante unido:", event.displayName);
-            },
-            cameraError: (error) => {
-                console.error("SEK-Time: Error de cámara:", error);
-                alert("No se pudo acceder a la cámara. Revisa los permisos de tu navegador.");
-                if (loader) loader.classList.add('jitsi-hidden');
-            },
-            micError: (error) => {
-                console.error("SEK-Time: Error de micrófono:", error);
-            }
-        });
-
-        if (!isReceiver) {
-            const type = audioOnly ? "Llamada de voz" : "Videollamada";
-            sendMessage(`📞 ${type} iniciada. Únete ahora.`, 'call', audioOnly);
-        }
-    } catch (error) {
-        console.error("SEK-Time: Error crítico iniciando llamada:", error);
-        alert("Hubo un error al iniciar la llamada. Por favor, inténtalo de nuevo.");
-        clearTimeout(loaderTimeoutFast);
-        clearTimeout(loaderTimeoutFinal);
-        if (loader) loader.classList.add('jitsi-hidden');
-        endCall();
-    }
-}
-
-function endCall() {
-    if (jitsiApi) {
-        jitsiApi.dispose();
-        jitsiApi = null;
-    }
-    jitsiContainer.innerHTML = '';
-    callModal.classList.remove('active');
-}
-
-btnEndCall.addEventListener('click', endCall);
-
-// Incoming Call UI
-function handleIncomingCall(msg) {
-    if (processedCallIds.has(msg.id)) return;
-    processedCallIds.add(msg.id);
-
-    const caller = allUsers.find(u => u.uid === msg.senderId);
-    if (!caller) return;
-
-    const callerDisplayName = getDisplayName(caller);
-    callerName.textContent = callerDisplayName;
-    callerAvatar.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(callerDisplayName)}&background=random&color=fff&size=200`;
-    callTypeText.textContent = msg.audioOnly ? "Llamada de voz entrante..." : "Videollamada entrante...";
-
-    incomingCallOverlay.classList.add('active');
-
-    // Button handlers for this specific call
-    btnAcceptCall.onclick = () => {
-        startCall(msg.audioOnly || false, true, caller);
-    };
-
-    btnDeclineCall.onclick = () => {
-        incomingCallOverlay.classList.remove('active');
-    };
-
-    // Auto-close after 30 seconds if not answered
-    setTimeout(() => {
-        incomingCallOverlay.classList.remove('active');
-    }, 30000);
-}
-
-// --- Profanity & Strike System ---
-const PROFANITY_LIST = ["mierda", "puta", "puto", "gilipollas", "cabron", "cabrón", "follar", "hijo de puta", "joder", "coño", "maricon", "maricón", "zorra", "bollera", "pendejo", "idiota", "estupido", "estúpido"];
-
-function hasProfanity(text) {
-    const lowerText = text.toLowerCase();
-    return PROFANITY_LIST.some(word => lowerText.includes(word));
-}
-
-const STRIKE_BANS = {
-    1: 1 * 60 * 60 * 1000,           // 1 hora
-    2: 5 * 60 * 60 * 1000,           // 5 horas
-    3: 24 * 60 * 60 * 1000,          // 1 día
-    4: 15 * 24 * 60 * 60 * 1000,     // 15 días
-    5: 30 * 24 * 60 * 60 * 1000,     // 1 mes
-    6: "permanent"                    // Permanente
-};
-
-async function applyStrike() {
-    if (!auth.currentUser) return;
-
-    const userRef = db.collection("users").doc(auth.currentUser.uid);
-    const doc = await userRef.get();
-    const data = doc.data();
-
-    const currentStrikes = (data.strikes || 0) + 1;
-    let banDuration = STRIKE_BANS[currentStrikes] || STRIKE_BANS[5];
-    let banUntil = null;
-
-    if (banDuration === "permanent" || currentStrikes >= 6) {
-        banUntil = "permanent";
-    } else {
-        banUntil = firebase.firestore.Timestamp.fromMillis(Date.now() + banDuration);
-    }
-
-    await userRef.update({
-        strikes: currentStrikes,
-        banUntil: banUntil,
-        status: "offline"
-    });
-
-    alert(`⚠️ SANCIÓN POR LENGUAJE INAPROPIADO
-
-Has acumulado ${currentStrikes} falta(s).
-Tu cuenta ha sido suspendida temporalmente.`);
-    location.reload(); // Force check
-}
-
-function checkBanStatus(data) {
-    if (!data.banUntil) return false;
-
-    if (data.banUntil === "permanent") {
-        showBanScreen("Sanción Permanente", "Has sido expulsado definitivamente por acumular 6 faltas. Contacta con un SuperAdmin para solicitar el desbloqueo.");
-        return true;
-    }
-
-    const now = Date.now();
-    const banDate = data.banUntil.toMillis();
-
-    if (now < banDate) {
-        const timeLeft = banDate - now;
-        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-        const days = Math.floor(hours / 24);
-
-        let msg = "Tu cuenta está suspendida. Quedan ";
-        if (days > 0) msg += `${days} días y ${hours % 24} horas.`;
-        else if (hours > 0) msg += `${hours} horas y ${minutes} minutos.`;
-        else msg += `${minutes} minutos.`;
-
-        showBanScreen("Cuenta Suspendida", msg);
-        return true;
-    }
-    return false;
-}
-
-function showBanScreen(title, message) {
-    isUserBanned = true;
-    document.body.innerHTML = `
-        <div style="background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: 'Inter', sans-serif; text-align: center; padding: 20px;">
-            <div style="max-width: 500px; background: #1e293b; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 0 50px rgba(244, 63, 94, 0.2);">
-                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px;"></i>
-                <h1 style="font-size: 32px; margin-bottom: 20px;">${title}</h1>
-                <p style="color: #94a3b8; font-size: 18px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
-                <button onclick="location.reload()" class="btn-login" style="width: 100%;">Reintentar conexión</button>
-            </div>
-        </div>
-    `;
-}
-
-// --- Auth States ---
-auth.onAuthStateChanged(async (user) => {
-    if (user) {
-        await handleUserLogin(user);
-    } else {
-        showLoginScreen();
-    }
-});
-
-async function handleUserLogin(user) {
-    const userDocRef = db.collection("users").doc(user.uid);
-    const doc = await userDocRef.get();
-
-    if (!doc.exists) {
-        const name = user.email.split('@')[0];
-        currentUserData = {
-            uid: user.uid,
-            email: user.email,
-            name: name,
-            role: "usuario",
-            status: "online",
-            pinnedChats: [],
-            phoneNumber: await generateUniquePhoneNumber(),
-            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        await userDocRef.set(currentUserData);
-    } else {
-        currentUserData = { uid: user.uid, ...doc.data() };
-
-        // Assign phone number if missing (migration)
-        if (!currentUserData.phoneNumber) {
-            currentUserData.phoneNumber = await generateUniquePhoneNumber();
-            await userDocRef.update({ phoneNumber: currentUserData.phoneNumber });
-        }
-
-        // Check Disabled Status
-        if (currentUserData.disabled === true) {
-            showBanScreen("Cuenta Desactivada", "Tu cuenta ha sido desactivada por un administrador. Contacta con un SuperAdmin para solicitar el acceso.");
-            return;
-        }
-
-        // Check Ban Status
-        if (checkBanStatus(currentUserData)) {
-            return;
-        }
-
-        await updateUserStatus("online");
-    }
-
-    setupUsersListener();
-    setupMessagesListener();
-    showChatScreen();
-    startIdleMonitoring();
-    requestNotificationPermission();
-
-    // Update lastSeen every 10 minutes while active
-    setInterval(() => {
-        if (auth.currentUser && document.visibilityState === 'visible') {
-            updateUserStatus("online");
-        }
-    }, 10 * 60 * 1000);
-}
-
-// --- Inactivity Logic ---
-function startIdleMonitoring() {
-    stopIdleMonitoring(); // Reset if already running
-    resetIdleTimer();
-
-    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    events.forEach(evt => {
-        window.addEventListener(evt, resetIdleTimer);
-    });
-}
-
-function stopIdleMonitoring() {
-    clearTimeout(idleTimeout);
-    clearTimeout(logoutTimeout);
-    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    events.forEach(evt => {
-        window.removeEventListener(evt, resetIdleTimer);
-    });
-}
-
-function resetIdleTimer() {
-    if (idleModal.classList.contains('active')) return; // Don't reset if modal is showing
-
-    clearTimeout(idleTimeout);
-    idleTimeout = setTimeout(showIdleModal, IDLE_TIME_LIMIT);
-}
-
-function showIdleModal() {
-    idleModal.classList.add('active');
-    updateUserStatus("offline"); // Mark as away/offline in background
-
-    let secondsLeft = 120;
-    idleTimerDisplay.textContent = `2:00`;
-
-    clearInterval(window.logoutCountdown);
-    window.logoutCountdown = setInterval(() => {
-        secondsLeft--;
-        const mins = Math.floor(secondsLeft / 60);
-        const secs = secondsLeft % 60;
-        idleTimerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-        if (secondsLeft <= 0) {
-            clearInterval(window.logoutCountdown);
-            handleAutoLogout();
-        }
-    }, 1000);
-}
-
-async function handleAutoLogout() {
-    idleModal.classList.remove('active');
-    await updateUserStatus("offline");
-    auth.signOut();
-    alert("Sesión cerrada por inactividad.");
-}
-
-btnIdleConfirm.addEventListener('click', () => {
-    idleModal.classList.remove('active');
-    clearInterval(window.logoutCountdown);
-    updateUserStatus("online");
-    resetIdleTimer();
-});
-
-// --- Presence System ---
-async function updateUserStatus(status) {
-    if (!auth.currentUser) return;
-    try {
-        await db.collection("users").doc(auth.currentUser.uid).update({
-            status: status,
-            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-        });
-    } catch (e) {
-        console.error("Error updating status:", e);
-    }
-}
-
-// Handle Page Visibility (Online/Away)
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        updateUserStatus("online");
-    } else {
-        // We set to offline or away when tab is hidden to be more accurate
-        updateUserStatus("offline");
-    }
-});
-
-// Handle Window Close
-window.addEventListener('beforeunload', (event) => {
-    if (auth.currentUser) {
-        // Use a synchronous-ish update or navigator.sendBeacon if needed,
-        // but for Firestore, a direct update usually works if not too many fields.
-        db.collection("users").doc(auth.currentUser.uid).update({
-            status: "offline",
-            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-        });
-    }
-});
-
-function showLoginScreen() {
-    currentUserData = null;
-    activeChatUser = null;
-    if (unsubscribeMessages) unsubscribeMessages();
-    if (unsubscribeUsers) unsubscribeUsers();
-    if (unsubscribeGroups) unsubscribeGroups();
-    chatScreen.classList.remove('active');
-    loginScreen.classList.add('active');
-}
-
-// --- UI helpers para responder/editar/borrar ---
-window.toggleMessageOptions = function(msgId, event) {
-    event.stopPropagation();
-    document.querySelectorAll('.options-menu').forEach(m => {
-        if (m.id !== `options-${msgId}`) m.classList.remove('active');
-    });
-    const menu = document.getElementById(`options-${msgId}`);
-    if (menu) menu.classList.toggle('active');
-};
-
-window.deleteMessage = async function(msgId) {
-    if(!confirm("¿Deseas eliminar este mensaje para todos?")) return;
-    try {
-        await db.collection("messages").doc(msgId).update({
-            isDeleted: true,
-            text: ""
-        });
-    } catch (e) {
-        console.error("Error al borrar mensaje:", e);
-    }
-};
-
-window.toggleUserDisabled = async (uid, currentlyDisabled) => {
-    const action = currentlyDisabled ? 'activar' : 'desactivar';
-    if (!confirm(`¿Seguro que quieres ${action} este usuario?`)) return;
-    try {
-        await db.collection("users").doc(uid).update({
-            disabled: !currentlyDisabled
-        });
-        renderAdminUserList();
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-window.resetStrikes = async (uid) => {
-    if (!confirm("¿Deseas resetear las faltas y el ban de este usuario?")) return;
-    try {
-        await db.collection("users").doc(uid).update({
-            strikes: 0,
-            banUntil: null
-        });
-        alert("Faltas reseteadas con éxito.");
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-window.startEditUser = (uid) => {
-    const user = [currentUserData, ...allUsers].find(u => u.uid === uid);
-    if (!user) return;
-
-    editingUserId = uid;
-    adminFormTitle.textContent = "Editando: " + user.name;
-    adminFormSubmit.textContent = "Guardar Cambios";
-    adminFormCancel.style.display = "block";
-
-    document.getElementById('new-user-name').value = user.name;
-    document.getElementById('new-user-email').value = user.email;
-    document.getElementById('new-user-email').disabled = true;
-    document.getElementById('new-user-role').value = user.role;
-
-    // V2 FIX: Never display or load stored passwords.
-    // Passwords are managed exclusively by Firebase Auth.
-    passwordContainer.style.display = "none";
-    newUserPassword.required = false;
-    newUserPassword.value = "";
-};
-
-window.deleteUser = async (uid) => {
-    if (!confirm("¿Seguro que quieres borrar este usuario? Se eliminará su cuenta de acceso permanentemente.")) return;
-    try {
-        // 1. Delete Firestore document
-        await db.collection("users").doc(uid).delete();
-
-        // 2. Attempt to delete from Firebase Auth via Cloud Function
-        // Requires a deployed Cloud Function named 'deleteAuthUser'
-        try {
-            const deleteAuthUser = firebase.functions ? firebase.functions().httpsCallable('deleteAuthUser') : null;
-            if (deleteAuthUser) {
-                await deleteAuthUser({ uid });
-            } else {
-                console.warn("Firebase Functions not initialized — Auth account NOT deleted. Deploy 'deleteAuthUser' Cloud Function to fully remove the user.");
-            }
-        } catch (fnErr) {
-            console.warn("Cloud Function 'deleteAuthUser' unavailable. The Auth account was NOT deleted and the user may still be able to log in.", fnErr);
-        }
-
-        alert("Usuario eliminado de la base de datos.\n⚠️ Nota: si no tienes desplegada la Cloud Function 'deleteAuthUser', la cuenta de acceso de este usuario sigue activa en Firebase Auth.");
-    } catch (e) {
-        alert("Error: " + e.message);
-    }
-};
-
-adminCreateForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = document.getElementById('new-user-name').value.trim();
-    const email = document.getElementById('new-user-email').value.trim();
-    const password = newUserPassword.value;
-    const role = document.getElementById('new-user-role').value;
-
-    try {
-        if (editingUserId) {
-            // V2 FIX: Only update name and role — never store or touch passwords.
-            const updateData = { name: name, role: role };
-            await db.collection("users").doc(editingUserId).update(updateData);
-            alert("Usuario actualizado");
-        } else {
-            // V9 FIX: Use the primary auth instance. Save admin credentials
-            // to restore the session after creating the new user account.
-            const adminEmail = auth.currentUser.email;
-            const adminPasswordInput = prompt(
-                `Para crear el usuario "${email}", introduce tu contraseña de administrador para restaurar tu sesión:`
-            );
-            if (!adminPasswordInput) return;
-
-            // Create the new user (this signs us out of the admin session)
-            const cred = await auth.createUserWithEmailAndPassword(email, password);
-            const newUid = cred.user.uid;
-
-            // V2 FIX: Never store the password in Firestore.
-            await db.collection("users").doc(newUid).set({
-                uid: newUid,
-                email: email,
-                name: name,
-                role: role,
-                status: "offline",
-                phoneNumber: await generateUniquePhoneNumber(),
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            // Sign out the newly created user and restore the admin session
-            await auth.signOut();
-            await auth.signInWithEmailAndPassword(adminEmail, adminPasswordInput);
-            alert("Usuario registrado: " + email);
-        }
-        resetAdminForm();
-    } catch (err) {
-        console.error("Error completo en Admin Panel:", err);
-        if (err.code === 'auth/too-many-requests') {
-            alert("⚠️ BLOQUEO TEMPORAL DE FIREBASE:\nHas realizado demasiadas solicitudes de creación de usuario seguidas.\n\nPor seguridad, Firebase ha bloqueado tu IP unos minutos. Espera 5-10 minutos e inténtalo de nuevo, o prueba a cambiar de red (datos móviles).");
-        } else {
-            alert("Error: " + err.message);
-        }
-    }
-});
-
-function resetAdminForm() {
-    editingUserId = null;
-    adminFormTitle.textContent = "Crear Nuevo Usuario";
-    adminFormSubmit.textContent = "Registrar Usuario";
-    adminFormCancel.style.display = "none";
-    document.getElementById('new-user-email').disabled = false;
-    passwordContainer.style.display = "block";
-    newUserPassword.required = true;
-    newUserPassword.type = "password";
-    newUserPassword.placeholder = "Contraseña";
-    adminCreateForm.reset();
-
-    if (currentUserData.role === 'super_admin') {
-        optRoleAdmin.style.display = 'block';
-        optRoleSuperAdmin.style.display = 'block';
-    } else {
-        optRoleAdmin.style.display = 'none';
-        optRoleSuperAdmin.style.display = 'none';
-        document.getElementById('new-user-role').value = 'usuario';
-    }
-}
-
-// --- Phone Number Generation ---
-async function generateUniquePhoneNumber() {
-    let exists = true;
-    let number = "";
-    while (exists) {
-        number = Math.floor(1000 + Math.random() * 9000).toString();
-        const snapshot = await db.collection("users").where("phoneNumber", "==", number).get();
-        if (snapshot.empty) exists = false;
-    }
-    return number;
-}
-
-// --- UI Helper Functions ---
-function showChatScreen() {
-    const displayName = getDisplayName(currentUserData);
-    myProfileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=00a884&color=fff&size=100`;
-    const roleClass = `role-${currentUserData.role}`;
-    currentUserName.innerHTML = `${displayName} <span class="role-badge ${roleClass}">${currentUserData.role}</span>`;
-
-    btnAdminPanel.style.display = (currentUserData.role === 'admin' || currentUserData.role === 'super_admin') ? 'block' : 'none';
-
-    loginScreen.classList.remove('active');
-    chatScreen.classList.add('active');
-}
-
-// --- Notification Permission ---
-function requestNotificationPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-    }
-}
-
-// --- Open Chat ---
-function openChatWith(entity) {
-    activeChatUser = entity;
-    const items = document.querySelectorAll('.contact-item');
-    items.forEach(el => el.classList.remove('active'));
-
-    activeContactName.textContent = entity.isGroup ? entity.name : getDisplayName(entity);
-    const avatar = entity.isGroup ?
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(entity.name)}&background=6366f1&color=fff` :
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(getDisplayName(entity))}&background=random&color=fff`;
-    activeContactImg.src = avatar;
-
-    chatHeaderInfo.classList.add('active');
-    chatHeaderText.classList.add('active');
-    welcomeMessage.style.display = 'none';
-    chatInputArea.style.display = 'flex';
-
-    updateHeaderStatus();
-    renderMessages();
-    markMessagesAsRead(entity);
-
-    if (window.innerWidth <= 768) {
-        appContainer.classList.add('show-chat');
-    }
-}
-
-// Update openChatWith to show header actions
-const originalOpenChatWith = openChatWith;
-openChatWith = function (entity) {
-    originalOpenChatWith(entity);
-    const headerActions = document.getElementById('chat-header-actions');
-    if (headerActions) headerActions.style.display = 'flex';
-};
-
-// --- Initialize on page load ---
-document.addEventListener('DOMContentLoaded', () => {
-    // Initial UI state handled by auth listener
 });
