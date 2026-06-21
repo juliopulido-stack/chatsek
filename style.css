@@ -590,23 +590,10 @@ body {
     gap: 8px;
 }
 
-.contact-status-row {
-    margin: 1px 0 2px 0;
-}
-
-.contact-status {
-    font-size: 11px;
-    display: block;
-}
-
-.contact-status.online-text {
-    color: #22c55e;
-    font-weight: 500;
-}
-
-.contact-status.offline-text {
-    color: var(--text-secondary);
-}
+.contact-status-row { margin: 1px 0 2px 0; }
+.contact-status { font-size: 11px; display: block; }
+.contact-status.online-text { color: #22c55e; font-weight: 500; }
+.contact-status.offline-text { color: var(--text-secondary); }
 
 .contact-message {
     font-size: 14px;
@@ -888,13 +875,8 @@ body {
     animation: slideUp 0.3s ease;
 }
 
-.message.sent {
-    color: #ffffff;
-}
-
-.message.received {
-    color: var(--text-primary);
-}
+.message.sent { color: #ffffff; }
+.message.received { color: var(--text-primary); }
 
 .message .time {
     font-size: 11px;
