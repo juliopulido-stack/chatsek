@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.3.2 - App Check activado.");
+        console.log("ChatSEK v3.3.3 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -1012,6 +1012,11 @@ function setupGroupsListener() {
             snapshot.forEach(doc => {
                 allGroups.push({ uid: doc.id, ...doc.data(), isGroup: true });
             });
+            // Keep the group-messages listener (in setupMessagesListener) in sync
+            // with the current list of groups the user belongs to.
+            if (typeof window._resubscribeGroupMessages === 'function') {
+                window._resubscribeGroupMessages();
+            }
             renderContacts();
             if (activeChatUser && activeChatUser.isGroup) {
                 const updatedActive = allGroups.find(g => g.uid === activeChatUser.uid);
@@ -1065,61 +1070,129 @@ function updateHeaderStatus() {
 }
 
 function setupMessagesListener() {
-    unsubscribeMessages = db.collection("messages").orderBy("timestamp", "asc")
-        .onSnapshot((snapshot) => {
-            snapshot.docChanges().forEach(change => {
-                if (change.type === "added") {
-                    const msg = { id: change.doc.id, ...change.doc.data() };
-                    const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
-                    const isNew = msgTime > listenerStartTime;
+    // IMPORTANT: Firestore rules restrict message reads to: sender, receiver, or group member.
+    // A single global query (orderBy only) would be rejected with permission-denied as soon as
+    // it hits any message that isn't ours. So we run THREE separate queries (sent / received /
+    // group messages) and merge them client-side. No orderBy is used (avoids needing composite
+    // indexes) — sorting happens locally instead.
+    const uid = auth.currentUser.uid;
+    let sentMsgs = {};
+    let receivedMsgs = {};
+    let groupMsgs = {};
+    let groupUnsubs = [];
 
-                    // Detect Incoming Call
-                    if (msg.type === 'call' && msg.receiverId === auth.currentUser.uid) {
-                        const thirtySecondsAgo = Date.now() - 30000;
-                        if (msgTime > thirtySecondsAgo && isNew) {
-                            handleIncomingCall(msg);
-                        }
-                    }
+    function handleNewMessage(msg, msgTime, isNew) {
+        // Detect Incoming Call
+        if (msg.type === 'call' && msg.receiverId === uid) {
+            const thirtySecondsAgo = Date.now() - 30000;
+            if (msgTime > thirtySecondsAgo && isNew) {
+                handleIncomingCall(msg);
+            }
+        }
 
-                    // Browser notification for new messages (not from self, not calls)
-                    if (isNew && msg.senderId !== auth.currentUser.uid && msg.type !== 'call') {
-                        const isDirectToMe = msg.receiverId === auth.currentUser.uid;
-                        const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
+        // Browser notification for new messages (not from self, not calls)
+        if (isNew && msg.senderId !== uid && msg.type !== 'call') {
+            const isDirectToMe = msg.receiverId === uid;
+            const isGroupWithMe = msg.groupId && allGroups.some(g => g.uid === msg.groupId);
 
-                        if (isDirectToMe || isGroupWithMe) {
-                            // Auto-read if the chat is currently open and the tab is visible
-                            const chatIsOpen = activeChatUser && (
-                                activeChatUser.uid === msg.senderId ||
-                                (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
-                            );
+            if (isDirectToMe || isGroupWithMe) {
+                const chatIsOpen = activeChatUser && (
+                    activeChatUser.uid === msg.senderId ||
+                    (activeChatUser.isGroup && activeChatUser.uid === msg.groupId)
+                );
 
-                            if (chatIsOpen && document.visibilityState === 'visible') {
-                                // Marcar en Set local Y en Firestore
-                                readMessageIds.add(msg.id);
-                                db.collection("messages").doc(msg.id).update({
-                                    readBy: firebase.firestore.FieldValue.arrayUnion(auth.currentUser.uid)
-                                });
-                            } else {
-                                // Show browser notification
-                                sendBrowserNotification(msg);
-                            }
-                        }
-                    }
-                }
-            });
-
-            allMessages = [];
-            snapshot.forEach((doc) => {
-                const msg = { id: doc.id, ...doc.data() };
-                allMessages.push(msg);
-                // Si Firestore ya tiene este mensaje como leído por mí, añadirlo al Set local
-                if (msg.readBy && auth.currentUser && msg.readBy.includes(auth.currentUser.uid)) {
+                if (chatIsOpen && document.visibilityState === 'visible') {
                     readMessageIds.add(msg.id);
+                    db.collection("messages").doc(msg.id).update({
+                        readBy: firebase.firestore.FieldValue.arrayUnion(uid)
+                    });
+                } else {
+                    sendBrowserNotification(msg);
                 }
-            });
-            renderContacts();
-            if (activeChatUser) renderMessages();
+            }
+        }
+    }
+
+    function mergeAndRender() {
+        const merged = Object.values({ ...sentMsgs, ...receivedMsgs, ...groupMsgs });
+        merged.sort((a, b) => {
+            const ta = a.timestamp && typeof a.timestamp.toMillis === 'function' ? a.timestamp.toMillis() : 0;
+            const tb = b.timestamp && typeof b.timestamp.toMillis === 'function' ? b.timestamp.toMillis() : 0;
+            return ta - tb;
         });
+        allMessages = merged;
+
+        allMessages.forEach(msg => {
+            if (msg.readBy && msg.readBy.includes(uid)) {
+                readMessageIds.add(msg.id);
+            }
+        });
+
+        renderContacts();
+        if (activeChatUser) renderMessages();
+    }
+
+    function processSnapshot(snapshot, bucket) {
+        snapshot.docChanges().forEach(change => {
+            const msg = { id: change.doc.id, ...change.doc.data() };
+            if (change.type === 'removed') {
+                delete bucket[msg.id];
+                return;
+            }
+            bucket[msg.id] = msg;
+
+            if (change.type === 'added') {
+                const msgTime = msg.timestamp ? msg.timestamp.toMillis() : Date.now();
+                const isNew = msgTime > listenerStartTime;
+                handleNewMessage(msg, msgTime, isNew);
+            }
+        });
+        mergeAndRender();
+    }
+
+    // Query 1: messages I sent
+    const unsubSent = db.collection("messages")
+        .where("senderId", "==", uid)
+        .onSnapshot(snap => processSnapshot(snap, sentMsgs),
+            err => console.error("Error en listener (enviados):", err));
+
+    // Query 2: messages sent to me directly
+    const unsubReceived = db.collection("messages")
+        .where("receiverId", "==", uid)
+        .onSnapshot(snap => processSnapshot(snap, receivedMsgs),
+            err => console.error("Error en listener (recibidos):", err));
+
+    // Query 3: group messages — re-subscribed whenever the group list changes
+    function resubscribeGroupMessages() {
+        groupUnsubs.forEach(u => u());
+        groupUnsubs = [];
+        groupMsgs = {};
+
+        const myGroupIds = allGroups.map(g => g.uid);
+        if (myGroupIds.length === 0) {
+            mergeAndRender();
+            return;
+        }
+        // Firestore 'in' supports up to 30 values per query
+        for (let i = 0; i < myGroupIds.length; i += 30) {
+            const chunk = myGroupIds.slice(i, i + 30);
+            const unsub = db.collection("messages")
+                .where("groupId", "in", chunk)
+                .onSnapshot(snap => processSnapshot(snap, groupMsgs),
+                    err => console.error("Error en listener (grupos):", err));
+            groupUnsubs.push(unsub);
+        }
+    }
+    resubscribeGroupMessages();
+
+    // Expose so group creation/joins can refresh the group message subscriptions
+    window._resubscribeGroupMessages = resubscribeGroupMessages;
+
+    unsubscribeMessages = () => {
+        unsubSent();
+        unsubReceived();
+        groupUnsubs.forEach(u => u());
+    };
 }
 
 // --- Browser Notifications ---
