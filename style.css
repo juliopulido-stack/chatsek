@@ -217,7 +217,7 @@ body {
         border-radius: 0;
     }
 
-    /* ── Fix #1: sidebar encuadre en iPhone (notch / Dynamic Island / home bar) ── */
+    /* ── Fix: sidebar encuadre en iPhone (notch / Dynamic Island / home bar) ── */
     .sidebar {
         width: 100%;
         max-width: 100%;
@@ -253,11 +253,11 @@ body {
         width: 100%;
     }
 
-    /* Logic to show chat and hide sidebar on mobile */
-    .app-container.show-chat .sidebar {
-        display: none;
-    }
-
+    /* Logic to show chat and hide sidebar on mobile.
+       IMPORTANT: only ONE element (.main-chat) is position:fixed and full-screen.
+       Header and input are normal flex children inside it (flex-shrink:0) —
+       NOT independently fixed — to avoid stacked fixed layers that can leave
+       an invisible touch-blocking strip on some iPhone screen sizes (e.g. 17 Pro). */
     .app-container.show-chat .main-chat {
         display: flex;
         flex-direction: column;
@@ -267,9 +267,13 @@ body {
         position: fixed;
         top: 0;
         left: 0;
+        right: 0;
+        bottom: 0;
         z-index: 100;
         overflow: hidden;
         background-color: var(--bg-color);
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
         box-sizing: border-box;
@@ -279,16 +283,13 @@ body {
         display: block !important;
     }
 
-    /* ── Fix #2: bloquear el header arriba — no debe moverse con el scroll ── */
+    /* Header: normal flex child, stays at top because the messages list (not the
+       header) is the scrollable element. No position:fixed needed here. */
     .chat-header {
         padding: 10px;
-        padding-top: calc(10px + env(safe-area-inset-top));
         flex-shrink: 0;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 1001;
+        position: relative;
+        z-index: 2;
         height: auto;
         min-height: 60px;
         background-color: var(--bg-panel);
@@ -303,15 +304,13 @@ body {
         font-size: 16px;
     }
 
-    /* Only the messages list scrolls — header (top) and input (bottom) stay fixed */
+    /* Only the messages list scrolls — header (top) and input (bottom) are
+       regular flex items above/below it, so they never move. */
     .chat-messages {
-        flex: 1;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        padding-top: calc(70px + env(safe-area-inset-top));
-        /* Space for the fixed header */
-        padding-bottom: calc(80px + env(safe-area-inset-bottom));
-        /* Space for the fixed input */
     }
 
     .message {
@@ -328,17 +327,16 @@ body {
         padding: 20px;
     }
 
-    /* ── Fix #2: bloquear la barra de input abajo — no debe moverse con el scroll ── */
+    /* Input bar: normal flex child at the bottom of .main-chat — not fixed,
+       so it can't create a phantom overlay above the keyboard area. */
     .chat-input-area {
-        position: fixed;
-        bottom: 0;
-        left: 0;
+        flex-shrink: 0;
         width: 100%;
         padding: 10px 16px;
         padding-bottom: calc(10px + env(safe-area-inset-bottom));
-        flex-shrink: 0;
         background-color: var(--bg-panel);
-        z-index: 1001;
+        position: relative;
+        z-index: 2;
         box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
         box-sizing: border-box;
     }
