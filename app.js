@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.3.4 - App Check activado.");
+        console.log("ChatSEK v3.3.5 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
