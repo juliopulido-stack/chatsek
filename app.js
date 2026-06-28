@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.3.9 - App Check activado.");
+        console.log("ChatSEK v3.4.0 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -159,7 +159,7 @@ function startRecording() {
 
             // Subir a Firebase Storage y enviar URL
             const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
-            const storageRef = storage.ref().child(`chat_audios/${fileName}`);
+            const storageRef = storage.ref().child(`chat_files/${fileName}`);
             
             storageRef.put(blob).then(snapshot => {
                 return snapshot.ref.getDownloadURL();
