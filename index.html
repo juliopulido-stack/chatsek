@@ -11,6 +11,7 @@
         NOTE: For full HTTP header-based CSP (HSTS, X-Frame-Options, etc.) you must
         configure your hosting provider (Cloudflare Pages / Netlify).
     -->
+<<<<<<< HEAD
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
         script-src 'self' 'unsafe-inline'
@@ -29,9 +30,7 @@
             https://cdnjs.cloudflare.com;
         img-src 'self' data: blob:
             https://ui-avatars.com
-            https://www.gstatic.com
-            https://*.firebasestorage.app
-            https://firebasestorage.googleapis.com;
+            https://www.gstatic.com;
         connect-src 'self'
             https://*.googleapis.com
             https://firestore.googleapis.com
@@ -41,17 +40,12 @@
             https://securetoken.googleapis.com
             https://*.cloudfunctions.net
             https://*.firebasestorage.app
-            https://firebasestorage.googleapis.com
             https://firebaseinstallations.googleapis.com
             https://firebaselogging-pa.googleapis.com
             https://www.google.com
             https://www.gstatic.com
-            https://recaptcha.google.com
-            https://meet.jit.si
-            https://8x8.vc;
-        media-src 'self' blob: data:
-            https://*.firebasestorage.app
-            https://firebasestorage.googleapis.com;
+            https://recaptcha.google.com;
+        media-src 'self' blob: data:;
         frame-src https://meet.jit.si https://8x8.vc https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/;
         object-src 'none';
         base-uri 'self';
@@ -68,8 +62,10 @@
 </head>
 
 <body>
+
     <!-- Login Screen -->
     <div id="login-screen" class="screen active">
+        <div class="app-version-top" style="z-index: 1000;">Version 3.2.7</div>
         <div class="login-container">
             <div class="logo-container">
                 <svg width="110" height="110" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 6px 18px rgba(34,197,94,0.45));margin-bottom:4px">
@@ -125,9 +121,7 @@
     <!-- Chat Screen -->
     <div id="chat-screen" class="screen">
         <div class="app-container">
-            <!-- Inactivity Modal -->
-            <div id="idle-modal" class="modal">
-                <div class="modal-content">
+            <!--               <div class="modal-content">
                     <i class="fas fa-clock"></i>
                     <h2>¿Sigues ahí?</h2>
                     <p>Has estado inactivo un tiempo. Si no respondes pronto, se cerrará tu sesión automáticamente por
@@ -140,6 +134,7 @@
             <!-- Sidebar (Contacts) -->
             <div class="sidebar">
                 <div class="sidebar-header">
+
                     <div class="user-profile" id="btn-edit-alias" title="Cambiar alias" style="cursor:pointer;">
                         <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil"
                             id="my-profile-img">
@@ -191,7 +186,7 @@
                     <!-- Contacts will be loaded here dynamically by JS -->
                 </div>
                 <div class="sidebar-footer">
-                    <div class="app-version-sidebar">Version 3.4.1</div>
+                    <div class="app-version-sidebar">Version 3.4.3</div>
                 </div>
             </div>
 
