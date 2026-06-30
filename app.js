@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.4.1 - App Check activado.");
+        console.log("ChatSEK v3.4.3 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -152,23 +152,27 @@ function startRecording() {
             const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
             const blob = new Blob(audioChunks, { type: mimeUsed });
 
-            if (blob.size > 900 * 1024) {
+            // Límite reducido: el audio se guarda como base64 directamente en Firestore
+            // (sin Firebase Storage), y un documento de Firestore tiene un máximo de 1MB.
+            // Base64 añade ~37% de overhead, así que limitamos el blob original a 650KB.
+            if (blob.size > 650 * 1024) {
                 alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
                 return;
             }
 
-            // Subir a Firebase Storage y enviar URL
-            const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
-            const storageRef = storage.ref().child(`chat_files/${fileName}`);
-            
-            storageRef.put(blob).then(snapshot => {
-                return snapshot.ref.getDownloadURL();
-            }).then(url => {
-                sendMessage(url, 'audio').catch(err => console.error(err));
-            }).catch(err => {
-                console.error("Error subiendo audio:", err);
-                alert("Error al subir la nota de voz.");
-            });
+            // Convertir a base64 (Data URL) y enviarlo directamente como mensaje.
+            // No usamos Firebase Storage: se guarda el audio codificado en el propio
+            // documento de Firestore.
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64Audio = reader.result; // data:audio/webm;base64,....
+                sendMessage(base64Audio, 'audio').catch(err => console.error(err));
+            };
+            reader.onerror = () => {
+                console.error("Error leyendo el audio grabado");
+                alert("Error al procesar la nota de voz.");
+            };
+            reader.readAsDataURL(blob);
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -306,7 +310,7 @@ const directorySearchInput = document.getElementById('directory-search');
 const directoryList = document.getElementById('directory-list');
 
 const groupNameInput = document.getElementById('group-name');
-const memberSearchInput = document.getElementById('member-search');
+var memberSearchInput = document.getElementById('member-search');
 const btnBackSidebar = document.getElementById('btn-back-sidebar');
 const appContainer = document.querySelector('.app-container');
 
@@ -1544,8 +1548,9 @@ function renderMessages() {
                 startCall(msg.audioOnly || false, true, caller);
             };
         } else if (msg.type === 'audio') {
-            // V10 FIX: Use safe URL from Storage and avoid XSS in attributes
-            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
+            // Audio guardado como base64 (data:audio/...) directamente en Firestore,
+            // o por compatibilidad con mensajes antiguos, una URL https:// de Storage.
+            const safeAudioUrl = (msg.text.startsWith('data:audio/') || msg.text.startsWith('https://')) ? msg.text : '';
             el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
         } else if (msg.type === 'image') {
            const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
@@ -1803,12 +1808,14 @@ btnNewGroup.addEventListener('click', () => {
 closeGroupModal.addEventListener('click', () => {
     groupModal.classList.remove('active');
     groupNameInput.value = '';
-    memberSearchInput.value = '';
+    if (memberSearchInput) { memberSearchInput.value = ''; }
 });
 
-memberSearchInput.addEventListener('input', () => {
+if (memberSearchInput) {
+  memberSearchInput.addEventListener('input', () => {
     renderMemberSelection(memberSearchInput.value.trim().toLowerCase());
-});
+  });
+}
 
 function renderMemberSelection(filter = '') {
     // Keep track of currently checked ones so we don't lose them on re-render
