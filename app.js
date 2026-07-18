@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.4.3 - App Check activado.");
+        console.log("ChatSEK v3.4.4 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -139,11 +139,11 @@ function startRecording() {
             }
         };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstop = async () => {
             stream.getTracks().forEach(t => t.stop());
             stopRecordingUI();
 
-            if (recordingCancelled) return;
+            if (recordingCancelled) { audioChunks = []; return; }
             if (audioChunks.length === 0) {
                 alert("No se grabó nada. Inténtalo de nuevo.");
                 return;
@@ -151,28 +151,37 @@ function startRecording() {
 
             const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
             const blob = new Blob(audioChunks, { type: mimeUsed });
+            audioChunks = [];
 
-            // Límite reducido: el audio se guarda como base64 directamente en Firestore
-            // (sin Firebase Storage), y un documento de Firestore tiene un máximo de 1MB.
-            // Base64 añade ~37% de overhead, así que limitamos el blob original a 650KB.
-            if (blob.size > 650 * 1024) {
-                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
+            console.log(`Audio: ${blob.size} bytes, tipo: ${blob.type}`);
+
+            if (blob.size < 100) {
+                alert("Audio demasiado corto.");
+                return;
+            }
+            if (blob.size > 5 * 1024 * 1024) {
+                alert("Audio demasiado grande (máx 5MB).");
                 return;
             }
 
-            // Convertir a base64 (Data URL) y enviarlo directamente como mensaje.
-            // No usamos Firebase Storage: se guarda el audio codificado en el propio
-            // documento de Firestore.
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64Audio = reader.result; // data:audio/webm;base64,....
-                sendMessage(base64Audio, 'audio').catch(err => console.error(err));
-            };
-            reader.onerror = () => {
-                console.error("Error leyendo el audio grabado");
-                alert("Error al procesar la nota de voz.");
-            };
-            reader.readAsDataURL(blob);
+            try {
+                messageInput.placeholder = "Subiendo audio...";
+                messageInput.disabled = true;
+                const ext = mimeUsed.includes('ogg') ? 'ogg' : mimeUsed.includes('mp4') ? 'mp4' : 'webm';
+                const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.${ext}`;
+                // Use chat_files/ — matches Firebase Storage rules
+                const storageRef = storage.ref().child(`chat_files/${fileName}`);
+                const snapshot = await storageRef.put(blob, { contentType: mimeUsed });
+                const url = await snapshot.ref.getDownloadURL();
+                await sendMessage(url, 'audio');
+                console.log("Audio enviado con éxito");
+            } catch(err) {
+                console.error("Error subiendo audio:", err);
+                alert("Error al subir nota de voz: " + err.message);
+            } finally {
+                messageInput.placeholder = "Escribe un mensaje";
+                messageInput.disabled = false;
+            }
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -203,7 +212,10 @@ function startRecordingUI() {
         const s = recordingSeconds % 60;
         recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
         // Límite de 30 segundos
-        if (recordingSeconds >= 30) stopRecording(false);
+        if (recordingSeconds >= 30) {
+            clearInterval(recordingTimerInterval);
+            stopRecording(false);
+        }
     }, 1000);
 }
 
@@ -1548,9 +1560,8 @@ function renderMessages() {
                 startCall(msg.audioOnly || false, true, caller);
             };
         } else if (msg.type === 'audio') {
-            // Audio guardado como base64 (data:audio/...) directamente en Firestore,
-            // o por compatibilidad con mensajes antiguos, una URL https:// de Storage.
-            const safeAudioUrl = (msg.text.startsWith('data:audio/') || msg.text.startsWith('https://')) ? msg.text : '';
+            // V10 FIX: Use safe URL from Storage and avoid XSS in attributes
+            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
             el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
         } else if (msg.type === 'image') {
            const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
