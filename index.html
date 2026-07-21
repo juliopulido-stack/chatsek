@@ -1,208 +1,434 @@
-
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Virus! Modern</title>
-    
-    <link rel="apple-touch-icon" href="virus.png">
-    <link rel="icon" type="image/png" href="virus.png">
-
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!--
+        V3/V7 FIX: Content Security Policy
+        Restricts where scripts, styles, images and connections can be loaded from.
+        This mitigates XSS attacks and unauthorized external resource loading.
+        NOTE: For full HTTP header-based CSP (HSTS, X-Frame-Options, etc.) you must
+        configure your hosting provider (Cloudflare Pages / Netlify).
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline'
+            https://www.gstatic.com
+            https://meet.jit.si
+            https://8x8.vc
+            https://www.google.com
+            https://www.gstatic.com/cpjs/
+            https://www.google.com/recaptcha/
+            https://www.gstatic.com/recaptcha/;
+        style-src 'self' 'unsafe-inline'
+            https://fonts.googleapis.com
+            https://cdnjs.cloudflare.com;
+        font-src 'self'
+            https://fonts.gstatic.com
+            https://cdnjs.cloudflare.com;
+        img-src 'self' data: blob:
+            https://ui-avatars.com
+            https://www.gstatic.com;
+        connect-src 'self'
+            https://*.googleapis.com
+            https://firestore.googleapis.com
+            https://*.firebaseio.com
+            wss://*.firebaseio.com
+            https://identitytoolkit.googleapis.com
+            https://securetoken.googleapis.com
+            https://*.cloudfunctions.net
+            https://*.firebasestorage.app
+            https://firebaseinstallations.googleapis.com
+            https://firebaselogging-pa.googleapis.com
+            https://www.google.com
+            https://www.gstatic.com
+            https://recaptcha.google.com;
+        media-src 'self' blob: data:;
+        frame-src https://meet.jit.si https://8x8.vc https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/;
+        object-src 'none';
+        base-uri 'self';
+    ">
+    <title>Chat SEK</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%2322c55e' stroke='%2386efac' stroke-width='4'/%3E%3Ccircle cx='50' cy='50' r='38' fill='%2316a34a'/%3E%3Cellipse cx='50' cy='47' rx='20' ry='16' fill='white'/%3E%3Cpolygon points='35,58 42,52 48,62' fill='white'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%2322c55e' stroke='%2386efac' stroke-width='4'/%3E%3Ccircle cx='50' cy='50' r='38' fill='%2316a34a'/%3E%3Cellipse cx='50' cy='47' rx='20' ry='16' fill='white'/%3E%3Cpolygon points='35,58 42,52 48,62' fill='white'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%2322c55e' stroke='%2386efac' stroke-width='4'/%3E%3Ccircle cx='50' cy='50' r='38' fill='%2316a34a'/%3E%3Cellipse cx='50' cy='47' rx='20' ry='16' fill='white'/%3E%3Cpolygon points='35,58 42,52 48,62' fill='white'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Jitsi Meet API -->
+    <script src='https://meet.jit.si/external_api.js'></script>
 </head>
+
 <body>
-    
-    <div id="license-modal">
-        <div class="license-box">
-            <div class="license-icon">🔒</div>
-            <h2>Acceso Bloqueado</h2>
-            <p id="license-msg">Has agotado tus 10 rondas de prueba.<br>Introduce tu código de licencia para continuar jugando ilimitadamente.</p>
-            <input type="text" id="license-key" class="license-input" placeholder="XXXX-XXXX">
-            <button onclick="validateLicense()" class="license-btn">DESBLOQUEAR</button>
-            <p id="license-error" style="color:red; margin-top:10px; display:none; font-size:0.9rem;">Código incorrecto</p>
-        </div>
-    </div>
-    
-    <div id="trial-counter" class="trial-info" style="display:none;"></div>
 
-    <div id="rules-modal">
-        <div class="rules-content">
-            <div class="rules-header">
-                <h2>📘 CÓMO JUGAR</h2>
-                <button class="rules-close-btn" onclick="toggleRules()">×</button>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="app-version-top" style="z-index: 1000;">Version 3.4.3</div>
+        <div class="login-container">
+            <div class="logo-container">
+                <svg width="110" height="110" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 6px 18px rgba(34,197,94,0.45));margin-bottom:4px">
+                    <defs>
+                        <radialGradient id="greenGrad" cx="40%" cy="35%" r="65%">
+                            <stop offset="0%" stop-color="#4ade80"/>
+                            <stop offset="100%" stop-color="#16a34a"/>
+                        </radialGradient>
+                    </defs>
+                    <!-- Outer light green ring -->
+                    <circle cx="50" cy="50" r="48" fill="#86efac"/>
+                    <!-- Main dark green circle -->
+                    <circle cx="50" cy="50" r="42" fill="url(#greenGrad)"/>
+                    <!-- Chat bubble at top -->
+                    <ellipse cx="50" cy="30" rx="14" ry="11" fill="white" opacity="0.95"/>
+                    <polygon points="43,40 50,34 46,43" fill="white" opacity="0.95"/>
+                    <!-- CHAT text in blue -->
+                    <text x="50" y="60" text-anchor="middle" font-family="Arial Black, Arial" font-weight="900" font-size="16" fill="#3b82f6" letter-spacing="1">CHAT</text>
+                    <!-- SEK text in white -->
+                    <text x="50" y="76" text-anchor="middle" font-family="Arial Black, Arial" font-weight="900" font-size="16" fill="white" letter-spacing="1">SEK</text>
+                </svg>
+                <h1>Chat SEK</h1>
+                <p>Tu plataforma de mensajería privada</p>
             </div>
-            <div class="rules-body">
-                <div class="rules-section">
-                    <h3>🏆 Objetivo</h3>
-                    <div class="rule-item">
-                        <div class="rule-icon">❤️</div>
-                        <div>Completa tu cuerpo con <b>4 órganos sanos</b> de diferente color (Rojo, Azul, Verde, Amarillo) para ganar.</div>
-                    </div>
+
+            <form id="login-form">
+                <div class="input-group">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" id="email" placeholder="Correo electrónico" required autocomplete="off">
                 </div>
 
-                <div class="rules-section">
-                    <h3>🕹️ Turno</h3>
-                    <p>En tu turno, solo puedes hacer <b>UNA</b> de estas dos cosas:</p>
-                    <ol>
-                        <li><b>Jugar 1 carta:</b> Ponla en tu cuerpo o en el de un rival.</li>
-                        <li><b>Descartar:</b> Tira 1, 2 o 3 cartas si no te sirven.</li>
-                    </ol>
-                    <p><i>*Al final de tu turno, robarás automáticamente hasta tener 3 cartas.</i></p>
+                <div class="input-group">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" id="password" placeholder="Contraseña" required>
                 </div>
 
-                <div class="rules-section">
-                    <h3>🦠 Cartas Básicas</h3>
-                    <div class="rule-item">
-                        <div class="rule-icon">🫀</div>
-                        <div><b>Órgano:</b> Ponlo en tu zona. Solo 1 de cada color.</div>
-                    </div>
-                    <div class="rule-item">
-                        <div class="rule-icon">💊</div>
-                        <div><b>Medicina:</b> Cura un virus o protege un órgano (vacuna). <br>2 Medicinas = <b>Inmunizado</b> (Intocable).</div>
-                    </div>
-                    <div class="rule-item">
-                        <div class="rule-icon">🦠</div>
-                        <div><b>Virus:</b> Infecta un órgano sano o destruye una vacuna. <br>2 Virus = <b>Extirpado</b> (Órgano destruido).</div>
-                    </div>
-                </div>
+                <div id="error-message" class="error-message">Correo o contraseña incorrectos</div>
 
-                <div class="rules-section">
-                    <h3>⚡ Cartas Especiales</h3>
-                    <div class="special-cards-grid">
-                        <div class="special-card-box"><b>🏥 Trasplante</b>Intercambia un órgano tuyo por uno de un rival.</div>
-                        <div class="special-card-box"><b>🧤 Ladrón</b>Roba un órgano de un rival para tu cuerpo.</div>
-                        <div class="special-card-box"><b>🤧 Contagio</b>Pasa tus virus a los órganos sanos de los demás.</div>
-                        <div class="special-card-box"><b>🧤 Guante Látex</b>Todos descartan su mano menos tú.</div>
-                        <div class="special-card-box"><b>🔁 Error Médico</b>Intercambia TODO tu cuerpo con el de otro jugador.</div>
-                    </div>
+                <div class="auth-buttons">
+                    <button type="submit" class="btn-login" id="btn-login">Entrar <i
+                            class="fas fa-arrow-right"></i></button>
+                    <!-- Registro público eliminado por seguridad -->
                 </div>
-            </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" id="forgot-password" class="forgot-password"
+                        style="color: var(--primary); font-size: 14px; text-decoration: none;">¿Has olvidado tu
+                        contraseña?</a>
+                </div>
+            </form>
         </div>
     </div>
 
-    <div id="main-menu">
-        <h1 class="game-title">JUEGO<span class="title-virus">VIRUS</span></h1>
-
-        <div class="menu-box-modern">
-            <input type="text" id="username" placeholder="Tu Nombre (ej: Pablo)" class="modern-input" autocomplete="off" maxlength="10">
-            
-            <button onclick="startLocalGame()" class="modern-btn btn-orange-glow">
-                👤 vs 🤖 (Local)
-            </button>
-            
-            <button onclick="showMultiplayerOptions()" class="modern-btn">
-                👥 Multiplayer (Online)
-            </button>
-
-            <button onclick="toggleRules()" class="modern-btn" style="background: #3498db; border-color: #2980b9;">
-                📘 Cómo Jugar
-            </button>
-
-            <div class="meta-container">
-                <label for="target-wins-main">Meta:</label>
-                <div class="modern-select-container">
-                    <select id="target-wins-main">
-                        <option value="3">3 🏆</option>
-                        <option value="5" selected>5 🏆</option>
-                        <option value="7">7 🏆</option>
-                        <option value="10">10 🏆</option>
-                    </select>
+    <!-- Chat Screen -->
+    <div id="chat-screen" class="screen">
+        <div class="app-container">
+            <!-- Idle Modal -->
+            <div id="idle-modal" class="modal">
+                <div class="modal-content">
+                    <i class="fas fa-clock"></i>
+                    <h2>¿Sigues ahí?</h2>
+                    <p>Has estado inactivo un tiempo. Si no respondes pronto, se cerrará tu sesión automáticamente por seguridad.</p>
+                    <div id="idle-timer-display">2:00</div>
+                    <button id="btn-idle-confirm" class="btn-login btn-idle-confirm">¡Estoy aquí!</button>
                 </div>
             </div>
-            
-            <button id="btn-activate-premium" onclick="openLicenseModal(true)" style="margin-top:10px; background:none; border:none; color:#7f8c8d; cursor:pointer; font-size:0.8rem; text-decoration:underline;">
-                ¿Tienes un código? Actívalo aquí
-            </button>
 
-            <div id="mp-options" style="display:none;">
-                <div class="mp-grid">
-                    <button onclick="createRoom()" class="modern-btn mp-btn-half" style="background: #27ae60; border-color:#2ecc71;">Crear Sala</button>
-                    <button onclick="joinRoomUI()" class="modern-btn mp-btn-half">Unirse</button>
-                </div>
-                
-                <div id="room-code-display" style="display:none; margin-top: 15px;">
-                    <p style="color:#ccc; margin:0;">CÓDIGO DE SALA:</p>
-                    <h2 id="my-code">...</h2>
-                    <div id="lobby-list" style="margin:10px 0; font-size:1rem; min-height: 20px;">
-                        Esperando jugadores...
+            <!-- Sidebar (Contacts) -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+
+                    <div class="user-profile" id="btn-edit-alias" title="Cambiar alias" style="cursor:pointer;">
+                        <img src="https://ui-avatars.com/api/?name=User&background=random" alt="Mi Perfil"
+                            id="my-profile-img">
+                        <span id="current-user-name">Usuario</span>
+                        <i class="fas fa-pen" style="font-size:11px; color:var(--text-secondary); margin-left:5px;"></i>
                     </div>
-                    <button id="start-game-btn" onclick="hostStartGame()" class="modern-btn btn-orange-glow" style="display:none; margin-top:10px;">
-                        ¡EMPEZAR PARTIDA!
-                    </button>
+                    <div class="header-actions">
+                        <i class="fas fa-user-shield" id="btn-admin-panel" style="display: none;"
+                            title="Panel de Administración"></i>
+                        <i class="fas fa-address-book" id="btn-directory" style="display: none;"
+                            title="Agenda / Directorio"></i>
+                        <i class="fas fa-th" id="btn-dialpad" style="display: none;" title="Abrir Marcador"></i>
+                        <i class="fas fa-users" id="btn-new-group" title="Crear Nuevo Grupo"></i>
+                        <i class="fas fa-ellipsis-v" id="btn-logout" title="Cerrar sesión"></i>
+                    </div>
                 </div>
-                
-                <div id="join-input-area" style="display:none; margin-top: 15px;">
-                    <input type="text" id="remote-code-input" placeholder="Introduce Código" class="modern-input" style="margin-bottom: 10px;">
-                    <button onclick="connectToPeer()" class="modern-btn" style="background: #27ae60; border-color:#2ecc71;">Entrar</button>
+
+                <!-- Alias Modal -->
+                <div id="alias-modal" class="modal">
+                    <div class="modal-content" style="max-width:380px;">
+                        <div class="modal-header">
+                            <h2>Tu alias</h2>
+                            <i class="fas fa-times" id="close-alias-modal"></i>
+                        </div>
+                        <div class="modal-body">
+                            <p style="color:var(--text-secondary); margin-bottom:14px; font-size:14px;">
+                                Escribe el alias que verán los demás cuando chatees con ellos. Si lo dejas vacío se
+                                usará tu nombre real.
+                            </p>
+                            <div class="input-group">
+                                <i class="fas fa-user-tag"></i>
+                                <input type="text" id="alias-input" placeholder="Tu alias..." maxlength="30"
+                                    autocomplete="off">
+                            </div>
+                            <button id="btn-save-alias" class="btn-login" style="margin-top:16px; width:100%;">Guardar
+                                alias</button>
+                        </div>
+                    </div>
                 </div>
-                 <p id="connection-status" style="margin-top: 15px; color: #aaa; font-size: 0.9rem;"></p>
+
+                <div class="search-bar">
+                    <div class="search-input">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="contact-search-input" placeholder="Busca un chat o inicia uno nuevo">
+                    </div>
+                </div>
+
+                <div id="contact-list" class="contact-list">
+                    <!-- Contacts will be loaded here dynamically by JS -->
+                </div>
+                <div class="sidebar-footer">
+                    <div class="app-version-sidebar">Version 3.4.3</div>
+                </div>
+            </div>
+
+
+        <!-- Directory Modal -->
+        <div id="directory-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Directorio de Usuarios</h2>
+                    <i class="fas fa-times" id="close-directory-modal"></i>
+                </div>
+                <div class="modal-body">
+                    <div class="search-bar">
+                        <div class="search-input">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="directory-search" placeholder="Buscar por nombre o número...">
+                        </div>
+                    </div>
+                    <div id="directory-list" class="directory-list">
+                        <!-- Users will be loaded here -->
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="menu-footer-styled">
-            🤖 powered by @aljupa
+        <!-- Group Creation Modal -->
+        <div id="group-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Crear Nuevo Grupo</h2>
+                    <i class="fas fa-times" id="close-group-modal"></i>
+                </div>
+                <div class="modal-body">
+                    <div class="group-form">
+                        <div class="input-group">
+                            <i class="fas fa-users"></i>
+                            <input type="text" id="group-name" placeholder="Nombre del grupo" required>
+                        </div>
+                        <div class="input-group" style="margin-top: 15px;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="member-search" placeholder="Buscar contactos para añadir...">
+                        </div>
+                        <h3 style="margin-top: 15px;">Selecciona los miembros:</h3>
+                        <div class="member-selection-list" id="member-selection-list">
+                            <!-- Contact list with checkboxes will be here -->
+                        </div>
+                        <button id="btn-create-group-submit" class="btn-login" style="margin-top: 20px;">Crear
+                            Grupo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Admin Panel Modal -->
+        <div id="admin-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Panel de Control - Usuarios</h2>
+                    <i class="fas fa-times" id="close-admin-modal"></i>
+                </div>
+                <div class="modal-body">
+                    <div class="admin-grid">
+                        <!-- Create/Edit User Form -->
+                        <div class="admin-card">
+                            <h3 id="admin-form-title">Crear Nuevo Usuario</h3>
+                            <form id="admin-create-user-form">
+                                <input type="text" id="new-user-name" placeholder="Nombre completo" required>
+                                <input type="email" id="new-user-email" placeholder="Correo electrónico" required>
+                                <div id="password-container">
+                                    <input type="password" id="new-user-password"
+                                        placeholder="Contraseña (solo para nuevos)" required>
+                                </div>
+                                <select id="new-user-role">
+                                    <option value="usuario">Usuario</option>
+                                    <option value="admin" id="opt-role-admin" style="display: none;">Admin</option>
+                                    <option value="super_admin" id="opt-role-superadmin" style="display: none;">
+                                        Super Admin</option>
+                                </select>
+                                <div class="form-actions" style="display: flex; gap: 10px;">
+                                    <button type="submit" class="btn-login" id="admin-form-submit">Registrar
+                                        Usuario</button>
+                                    <button type="button" class="btn-secondary" id="admin-form-cancel"
+                                        style="display: none;">Cancelar</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- User List -->
+                    <div class="admin-card">
+                        <h3>Lista de Usuarios</h3>
+                        <div class="admin-user-list" id="admin-user-list">
+                            <!-- Dynamically loaded -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Main Chat Area -->
+        <div class="main-chat">
+            <!-- Chat Header -->
+            <div class="chat-header">
+                <div class="chat-header-info">
+                    <i class="fas fa-chevron-left" id="btn-back-sidebar"
+                        style="display: none; margin-right: 15px; cursor: pointer; font-size: 20px;"></i>
+                    <img id="active-contact-img" src="">
+                    <div class="chat-header-text">
+                        <h2 id="active-contact-name">Selecciona un chat</h2>
+                        <span class="status">en línea</span>
+                    </div>
+                </div>
+                <div class="chat-header-actions" id="chat-header-actions" style="display: none;">
+                    <i class="fas fa-video" id="btn-video-call" title="Videollamada"></i>
+                    <i class="fas fa-phone" id="btn-voice-call" title="Llamada de voz"></i>
+                    <i class="fas fa-search"></i>
+                    <i class="fas fa-ellipsis-v"></i>
+                </div>
+            </div>
+
+            <!-- Chat Messages -->
+            <div class="chat-messages" id="chat-messages">
+                <div class="welcome-message" id="welcome-message">
+                    <i class="fas fa-shield-alt"></i>
+                    <h2>Chat SEK para Web</h2>
+                    <p>Envía y recibe mensajes privados.</p>
+                </div>
+                <!-- Messages will appear here -->
+            </div>
+
+            <!-- Chat Input -->
+            <div class="chat-input-area" id="chat-input-area" style="display: none; position: relative;">
+                <!-- Caja de previsualización de cita / respuesta oculta por defecto -->
+                <div id="reply-box-input" class="reply-box-input">
+                    <div class="reply-box-content">
+                        <span id="reply-sender-name" class="reply-sender"></span>
+                        <div id="reply-text-preview" class="reply-text"></div>
+                    </div>
+                    <i class="fas fa-times close-reply" id="btn-close-reply" title="Cancelar respuesta"></i>
+                </div>
+
+                <i class="far fa-smile" id="emoji-btn"></i>
+                <i class="fas fa-paperclip" id="attach-btn"></i>
+                <input type="file" id="file-input" style="display: none;">
+                <div class="input-container">
+                    <input type="text" id="message-input" placeholder="Escribe un mensaje" autocomplete="off">
+                </div>
+                <div id="voice-btn" class="voice-btn" title="Clic para grabar, clic para enviar">
+                    <i class="fas fa-microphone"></i>
+                </div>
+                <i class="fas fa-paper-plane" id="send-btn" style="display: none;"></i>
+            </div>
+
+            <!-- Recording indicator -->
+            <div id="recording-bar" class="recording-bar" style="display:none;">
+                <span class="recording-dot"></span>
+                <span id="recording-timer">0:00</span>
+                <span style="flex:1; color: var(--text-secondary); font-size:13px;">Grabando... (máx. 30s)</span>
+                <button id="cancel-recording" class="rec-btn rec-btn-cancel" title="Cancelar"><i
+                        class="fas fa-times"></i></button>
+                <button id="send-recording" class="rec-btn rec-btn-send" title="Enviar audio"><i
+                        class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+
+        <!-- Dial Pad Modal (Llamar) -->
+        <div id="dialpad-modal" class="modal">
+            <div class="modal-content dialpad-content">
+                <div class="modal-header">
+                    <h2>Marcador SEK</h2>
+                    <i class="fas fa-times" id="close-dialpad-modal"></i>
+                </div>
+                <div class="dialpad-display">
+                    <div id="dialpad-number"></div>
+                    <i class="fas fa-backspace" id="btn-dialpad-delete"></i>
+                </div>
+                <div class="dialpad-grid">
+                    <div class="dial-btn" data-val="1">1</div>
+                    <div class="dial-btn" data-val="2">2</div>
+                    <div class="dial-btn" data-val="3">3</div>
+                    <div class="dial-btn" data-val="4">4</div>
+                    <div class="dial-btn" data-val="5">5</div>
+                    <div class="dial-btn" data-val="6">6</div>
+                    <div class="dial-btn" data-val="7">7</div>
+                    <div class="dial-btn" data-val="8">8</div>
+                    <div class="dial-btn" data-val="9">9</div>
+                    <div class="dial-btn dial-btn-empty"></div>
+                    <div class="dial-btn" data-val="0">0</div>
+                    <div class="dial-btn dial-btn-empty"></div>
+                </div>
+                <button id="btn-dialpad-call" class="btn-dial-call">
+                    <i class="fas fa-phone"></i> Llamar
+                </button>
+                <div id="dialpad-error" class="dial-error"></div>
+            </div>
+        </div>
         </div>
     </div>
 
-    <div id="round-modal">
-        <div class="round-content">
-            <h2 id="round-title">¡GANADOR!</h2>
-            <p id="round-message">El jugador X gana la ronda</p>
-            <div id="round-scores" style="margin-bottom: 20px; font-weight: bold;"></div>
-            <button id="next-round-btn" onclick="continueGame()">CONTINUAR</button>
+    <!-- SEK-Time Video Call Modal -->
+    <div id="call-modal" class="modal">
+        <div class="modal-content call-modal-content">
+            <div class="modal-header call-modal-header">
+                <div class="call-info">
+                    <i class="fas fa-video"></i>
+                    <h2 id="call-title">SEK-Time: Llamada en curso</h2>
+                </div>
+                <button id="btn-end-call" class="btn-danger-circle"><i class="fas fa-phone-slash"></i></button>
+            </div>
+            <div id="jitsi-container"></div>
+            <div id="jitsi-loader" class="jitsi-hidden">
+                <div class="spinner"></div>
+                <p>Conectando con SEK-Time...</p>
+                <p style="font-size: 12px; margin-top: 10px; opacity: 0.7;">Si tarda demasiado, comprueba tu conexión.
+                </p>
+            </div>
         </div>
     </div>
 
-    <button id="chat-btn" onclick="toggleChat()" style="display:none;">💬 <span id="chat-badge" style="display:none;">●</span></button>
-    <div id="chat-modal" style="display:none;">
-        <div class="chat-content">
-            <div class="chat-header"><h3>Chat</h3><button onclick="toggleChat()">✖</button></div>
-            <div id="chat-history"></div>
-            <div class="chat-input-area"><input id="chat-input"><button onclick="sendChatMessage()">➤</button></div>
+    <!-- Incoming Call Overlay -->
+    <div id="incoming-call-overlay" class="calling-overlay">
+        <div class="calling-container">
+            <img src="" id="caller-avatar" class="caller-avatar" alt="Caller">
+            <div class="calling-text">
+                <h2 id="caller-name">Nombre</h2>
+                <p id="call-type-text">Videollamada entrante...</p>
+            </div>
+            <div class="calling-actions">
+                <button id="btn-accept-call" class="btn-call-action accept">
+                    <i class="fas fa-phone"></i>
+                </button>
+                <button id="btn-decline-call" class="btn-call-action decline">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
         </div>
     </div>
 
-    <div id="game-container" class="blurred">
-        <div id="scoreboard-area"></div>
-        <div id="notification-bar">...</div>
-        
-        <div id="rivals-container"></div>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-check-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 
-        <div id="deck-area">
-            <div id="dynamic-controls"></div>
-            <div class="deck-info"><div class="card deck-visual"><span id="deck-count">0</span></div></div>
-            <button onclick="confirmExit()" id="restart-btn" style="display:none">Salir</button>
-        </div>
-
-        <div class="board-section" id="my-board-section">
-            <div id="player-body" class="body-slots"></div>
-            <h3>👤 TU SALUD</h3>
-            <div id="player-hand" class="hand"></div>
-        </div>
-    </div>
-    
-    <div class="version-display">V.4.9.6</div>
-    <script src="script.js"></script>
-    <script>
-window.addEventListener('DOMContentLoaded', function () {
-  var nombre = document.getElementById('username');
-  if (nombre) {
-    // Si por algún motivo tiene el foco, quítaselo.
-    nombre.blur();
-  }
-});
-</script>
+    <script src="app.js"></script>
 </body>
+
 </html>
-
-
-
-
-
-
-
