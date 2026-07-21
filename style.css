@@ -228,25 +228,15 @@ body {
         height: 100vh;
         height: 100dvh;
         border-radius: 0;
-        /* On mobile the app-container is just a shell — sidebar and main-chat
-           take over the full screen independently via position:fixed */
-        overflow: hidden;
-        position: relative;
     }
 
-    /* ── SIDEBAR: full screen, shown by default ── */
+    /* ── Fix: sidebar encuadre en iPhone (notch / Dynamic Island / home bar) ── */
     .sidebar {
         width: 100%;
         max-width: 100%;
         min-width: 100%;
         height: 100vh;
         height: 100dvh;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 50;
         transition: transform 0.3s ease;
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
@@ -254,9 +244,6 @@ body {
         padding-right: env(safe-area-inset-right);
         box-sizing: border-box;
         overflow: hidden;
-        background-color: var(--bg-panel);
-        display: flex;
-        flex-direction: column;
     }
 
     .sidebar-header {
@@ -273,18 +260,17 @@ body {
         flex-shrink: 0;
     }
 
-    /* ── When chat is open: HIDE sidebar, SHOW main-chat ── */
-    .app-container.show-chat .sidebar {
-        display: none;
-    }
-
-    /* ── MAIN CHAT: hidden by default ── */
     .main-chat {
         display: none;
+        /* Hidden by default on mobile */
         width: 100%;
     }
 
-    /* ── When chat is open: show main-chat full screen ── */
+    /* Logic to show chat and hide sidebar on mobile.
+       IMPORTANT: only ONE element (.main-chat) is position:fixed and full-screen.
+       Header and input are normal flex children inside it (flex-shrink:0) —
+       NOT independently fixed — to avoid stacked fixed layers that can leave
+       an invisible touch-blocking strip on some iPhone screen sizes (e.g. 17 Pro). */
     .app-container.show-chat .main-chat {
         display: flex;
         flex-direction: column;
@@ -310,7 +296,8 @@ body {
         display: block !important;
     }
 
-    /* Header: normal flex child — no position:fixed to avoid phantom touch layers */
+    /* Header: normal flex child, stays at top because the messages list (not the
+       header) is the scrollable element. No position:fixed needed here. */
     .chat-header {
         padding: 10px;
         flex-shrink: 0;
@@ -330,7 +317,8 @@ body {
         font-size: 16px;
     }
 
-    /* Only messages scroll */
+    /* Only the messages list scrolls — header (top) and input (bottom) are
+       regular flex items above/below it, so they never move. */
     .chat-messages {
         flex: 1 1 auto;
         min-height: 0;
@@ -352,7 +340,8 @@ body {
         padding: 20px;
     }
 
-    /* Input bar: flex child at bottom — not fixed, no phantom overlay */
+    /* Input bar: normal flex child at the bottom of .main-chat — not fixed,
+       so it can't create a phantom overlay above the keyboard area. */
     .chat-input-area {
         flex-shrink: 0;
         width: 100%;
@@ -451,12 +440,16 @@ body {
     background: var(--bg-panel);
 }
 
-.app-version-sidebar {
+.app-version-top {
+    position: absolute;
+    top: 15px;
+    left: 15px;
     font-size: 12px;
     color: var(--primary);
-    opacity: 1;
     font-weight: 600;
+    z-index: 10;
 }
+
 
 
 .sidebar-header {
