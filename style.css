@@ -1946,7 +1946,7 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 14px;
     padding: 0;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
     z-index: 2000;
     width: 340px;
     max-height: 420px;
@@ -1972,9 +1972,7 @@ body {
     box-sizing: border-box;
 }
 
-.emoji-search-input:focus {
-    border-color: var(--primary);
-}
+.emoji-search-input:focus { border-color: var(--primary); }
 
 .emoji-tabs {
     display: flex;
@@ -1994,15 +1992,8 @@ body {
     opacity: 0.6;
 }
 
-.emoji-tab:hover {
-    background: var(--bg-hover);
-    opacity: 1;
-}
-
-.emoji-tab.active {
-    background: var(--primary);
-    opacity: 1;
-}
+.emoji-tab:hover { background: var(--bg-hover); opacity: 1; }
+.emoji-tab.active { background: var(--primary); opacity: 1; }
 
 .emoji-cat-label {
     font-size: 11px;
