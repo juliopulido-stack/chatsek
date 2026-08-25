@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.4.5 - App Check activado.");
+        console.log("ChatSEK v3.4.6 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -139,32 +139,30 @@ function startRecording() {
             }
         };
 
-        mediaRecorder.onstop = async () => {
+        mediaRecorder.onstop = () => {
             stream.getTracks().forEach(t => t.stop());
             stopRecordingUI();
-            if (recordingCancelled) { audioChunks = []; return; }
-            if (audioChunks.length === 0) { alert("No se grabó nada."); return; }
+
+            if (recordingCancelled) return;
+            if (audioChunks.length === 0) {
+                alert("No se grabó nada. Inténtalo de nuevo.");
+                return;
+            }
+
             const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
             const blob = new Blob(audioChunks, { type: mimeUsed });
-            audioChunks = [];
-            if (blob.size < 100) { alert("Audio demasiado corto."); return; }
-            if (blob.size > 5 * 1024 * 1024) { alert("Audio demasiado grande (máx 5MB)."); return; }
-            try {
-                messageInput.placeholder = "Subiendo audio...";
-                messageInput.disabled = true;
-                const ext = mimeUsed.includes('ogg') ? 'ogg' : mimeUsed.includes('mp4') ? 'mp4' : 'webm';
-                const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.${ext}`;
-                const storageRef = storage.ref().child(`chat_files/${fileName}`);
-                const snapshot = await storageRef.put(blob, { contentType: mimeUsed });
-                const url = await snapshot.ref.getDownloadURL();
-                await sendMessage(url, 'audio');
-            } catch(err) {
-                console.error("Error subiendo audio:", err);
-                alert("Error al subir nota de voz: " + err.message);
-            } finally {
-                messageInput.placeholder = "Escribe un mensaje";
-                messageInput.disabled = false;
+
+            // Audio guardado como base64 en Firestore (sin Firebase Storage).
+            if (blob.size > 650 * 1024) {
+                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
+                return;
             }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                sendMessage(reader.result, 'audio').catch(err => console.error(err));
+            };
+            reader.onerror = () => alert("Error al procesar la nota de voz.");
+            reader.readAsDataURL(blob);
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -195,10 +193,7 @@ function startRecordingUI() {
         const s = recordingSeconds % 60;
         recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
         // Límite de 30 segundos
-        if (recordingSeconds >= 30) {
-            clearInterval(recordingTimerInterval);
-            stopRecording(false);
-        }
+        if (recordingSeconds >= 30) stopRecording(false);
     }, 1000);
 }
 
@@ -513,6 +508,7 @@ function stopIdleMonitoring() {
 }
 
 function resetIdleTimer() {
+    if (!idleModal) return;
     if (idleModal.classList.contains('active')) return; // Don't reset if modal is showing
 
     clearTimeout(idleTimeout);
@@ -1013,9 +1009,6 @@ function setupGroupsListener() {
             });
             // Keep the group-messages listener (in setupMessagesListener) in sync
             // with the current list of groups the user belongs to.
-            if (typeof window._resubscribeGroupMessages === 'function') {
-                window._resubscribeGroupMessages();
-            }
             if (typeof window._resubscribeGroupMessages === 'function') {
                 window._resubscribeGroupMessages();
             }
@@ -1547,7 +1540,7 @@ function renderMessages() {
             };
         } else if (msg.type === 'audio') {
             // V10 FIX: Use safe URL from Storage and avoid XSS in attributes
-            const safeAudioUrl = msg.text.startsWith('https://') ? msg.text : '';
+            const safeAudioUrl = (msg.text.startsWith('data:audio/') || msg.text.startsWith('https://')) ? msg.text : '';
             el.innerHTML = `${replyHtml}${senderName}<div class="voice-message-bubble"><i class="fas fa-microphone"></i><audio controls src="${escapeHtml(safeAudioUrl)}"></audio></div><span class="time">${msg.time}</span>${optionsHtml}`;
         } else if (msg.type === 'image') {
            const safeImgUrl = msg.text.startsWith('https://') ? msg.text : '';
@@ -2066,33 +2059,116 @@ if (contactSearchInput) {
         renderContacts(e.target.value.toLowerCase());
     });
 }
-if (emojiBtn) {
-    emojiBtn.addEventListener('click', () => {
-        if (emojiPicker) {
-            emojiPicker.remove();
-            emojiPicker = null;
-            return;
-        }
+// --- Full Emoji Picker ---
+const EMOJI_CATS = [
+    { name:'Recientes', icon:'🕐', emojis:[] },
+    { name:'Caras', icon:'😀', emojis:['😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','🥰','😘','😗','😙','😚','🙂','🤗','🤩','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌','😛','😜','😝','🤤','😒','😔','😞','😟','😠','😡','🤬','😤','😢','😭','😩','🥺','😲','😳','🥵','🥶','😱','😨','😰','😓','😬','🤫','🥸','🤓','🥳','😇','🤠','🤡','🥹','🙃','🫠','🫡','🫤','🤯','😵','🥴','😷','🤒','🤕','🤢','🤮','🤧','😈','👿','💀','☠️','💩','👹','👺','👻','👽','👾','🤖'] },
+    { name:'Gestos', icon:'👋', emojis:['👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛','🤜','👏','🫶','🙌','👐','🤲','🙏','✍️','💅','🤳','💪','🦾','🦵','🦶','👂','🦻','👃','👀','👁️','👅','👄','💋'] },
+    { name:'Personas', icon:'👨', emojis:['👶','🧒','👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵','🙍','🙎','🙅','🙆','💁','🙋','🧏','🙇','🤦','🤷','👮','🕵️','💂','🥷','👷','🤴','👸','👳','👲','🧕','🤵','👰','🤰','🤱','👼','🎅','🤶','🦸','🦹','🧙','🧚','🧛','🧜','🧝','🧞','🧟','💆','💇','🚶','🧍','🧎','🏃','💃','🕺','👫','👬','👭','💏','💑','👪'] },
+    { name:'Animales', icon:'🐶', emojis:['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷️','🦂','🐢','🐍','🦎','🐙','🦑','🦐','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐕','🐩','🐈','🐓','🦃','🦚','🦜','🦢','🕊️','🐇','🦝','🦦','🦥','🐁','🐀','🐿️','🦔','🐾','🌵','🎄','🌲','🌳','🌴','🌱','🌿','☘️','🍀','🍃','🍂','🍁','🍄','🌾','💐','🌷','🌹','🌺','🌸','🌼','🌻'] },
+    { name:'Comida', icon:'🍕', emojis:['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🧀','🥚','🍳','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🥪','🥙','🌮','🌯','🥗','🥘','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🍤','🍙','🍚','🍘','🍥','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🍯','🧃','🥤','🧋','☕','🫖','🍵','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🍾','🧊'] },
+    { name:'Actividades', icon:'⚽', emojis:['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🏓','🏸','🏒','🥊','🥋','🎽','🛹','🛼','🛷','🥌','🎿','⛷️','🏂','🏋️','🤼','🤸','⛹️','🤺','🧘','🏊','🏄','🚣','🧗','🚵','🚴','🏆','🥇','🥈','🥉','🏅','🎖️','🎪','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎺','🎸','🎻','🎲','♟️','🎯','🎳','🎮','🎰','🧩','🧸','🎉','🎊','🎈','🎀','🎁','🎗️'] },
+    { name:'Viajes', icon:'🚗', emojis:['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🚲','🛴','🛹','⚓','⛵','🚤','🛥️','🛳️','🚢','✈️','🛩️','💺','🚁','🚀','🛸','🌍','🌎','🌏','🗺️','🧭','🏔️','⛰️','🌋','🏕️','🏖️','🏜️','🏝️','🏟️','🏛️','🏗️','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','⛪','🕌','⛲','⛺','🌁','🌃','🏙️','🌄','🌅','🌆','🌇','🌉','🎠','🎡','🎢'] },
+    { name:'Objetos', icon:'💡', emojis:['⌚','📱','💻','⌨️','🖥️','🖨️','🖱️','💾','💿','📀','📷','📸','📹','🎥','📞','☎️','📺','📻','🧭','⏰','🕰️','⌛','⏳','📡','🔋','🔌','💡','🔦','🕯️','🧯','💸','💵','💴','💶','💷','💰','💳','💎','⚖️','🧲','🔧','🔩','⚙️','🔗','🧰','🔨','⚒️','🛠️','🔪','⚔️','🛡️','🔮','🪄','🔐','🔏','🔒','🔓','🔑','🗝️','📝','✏️','🖊️','📖','📚','📰','📋','📁','📂','📅','📌','📍','📎','✂️','🗑️','🔎','🔍','🔭','🔬','🩺','💊','💉','🧬','🦠','🧪','🧫','🧲','🪞','🪟','🛋️','🪑','🚿','🛁','🧹','🧺','🧻','🪣','🧼','🫧','🧽','🧴','🛒'] },
+    { name:'Símbolos', icon:'❤️', emojis:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','☢️','☣️','♻️','✅','❌','⭕','🛑','⛔','🚫','💯','💢','♨️','❗','❕','❓','❔','‼️','⁉️','🔴','🟠','🟡','🟢','🔵','🟣','🟤','⚫','⚪','🟥','🟧','🟨','🟩','🟦','🟪','🟫','⬛','⬜','▪️','▫️','🔶','🔷','🔸','🔹','🔺','🔻','💠','🔘','🔳','🔲','🏁','🚩','🎌','🏴','🏳️'] },
+];
 
-        emojiPicker = document.createElement('div');
-        emojiPicker.className = 'emoji-picker';
+let emojiRecentList = [];
+try { emojiRecentList = JSON.parse(localStorage.getItem('emojiRecent') || '[]'); } catch(e){}
+let emojiCurrentCat = 1;
 
-        const emojis = ["😀", "😂", "🥰", "😍", "😎", "🤔", "😜", "😇", "🥳", "😭", "👍", "❤️", "🔥", "✨", "🙌", "🙏", "🚀", "🎉"];
+function saveRecentEmoji(emoji) {
+    emojiRecentList = [emoji, ...emojiRecentList.filter(e => e !== emoji)].slice(0, 30);
+    try { localStorage.setItem('emojiRecent', JSON.stringify(emojiRecentList)); } catch(e){}
+    EMOJI_CATS[0].emojis = emojiRecentList;
+}
 
-        emojis.forEach(emoji => {
-            const span = document.createElement('span');
-            span.className = 'emoji-item';
-            span.textContent = emoji;
-            span.onclick = () => {
+function renderEmojiGrid(grid, emojis) {
+    grid.innerHTML = '';
+    if (!emojis || emojis.length === 0) {
+        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:20px;color:#888;font-size:13px;">Sin emojis recientes</div>';
+        return;
+    }
+    emojis.forEach(emoji => {
+        const span = document.createElement('span');
+        span.className = 'emoji-item';
+        span.textContent = emoji;
+        span.onclick = (e) => {
+            e.stopPropagation();
+            if (messageInput) {
                 messageInput.value += emoji;
                 messageInput.focus();
-                // Trigger input event to show send button if needed
                 messageInput.dispatchEvent(new Event('input'));
-            };
-            emojiPicker.appendChild(span);
-        });
+            }
+            saveRecentEmoji(emoji);
+        };
+        grid.appendChild(span);
+    });
+}
 
-        document.getElementById('chat-input-area').appendChild(emojiPicker);
+function buildEmojiPicker() {
+    EMOJI_CATS[0].emojis = emojiRecentList;
+    const picker = document.createElement('div');
+    picker.className = 'emoji-picker';
+    picker.id = 'emoji-picker-full';
+
+    const searchBar = document.createElement('div');
+    searchBar.className = 'emoji-search-bar';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = '🔍 Buscar emoji...';
+    searchInput.className = 'emoji-search-input';
+    searchBar.appendChild(searchInput);
+    picker.appendChild(searchBar);
+
+    const tabs = document.createElement('div');
+    tabs.className = 'emoji-tabs';
+    EMOJI_CATS.forEach((cat, i) => {
+        const tab = document.createElement('span');
+        tab.className = 'emoji-tab' + (i === emojiCurrentCat ? ' active' : '');
+        tab.textContent = cat.icon;
+        tab.title = cat.name;
+        tab.onclick = (e) => {
+            e.stopPropagation();
+            emojiCurrentCat = i;
+            document.querySelectorAll('.emoji-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            catLabel.textContent = EMOJI_CATS[i].name;
+            searchInput.value = '';
+            renderEmojiGrid(grid, EMOJI_CATS[i].emojis);
+        };
+        tabs.appendChild(tab);
+    });
+    picker.appendChild(tabs);
+
+    const catLabel = document.createElement('div');
+    catLabel.className = 'emoji-cat-label';
+    catLabel.textContent = EMOJI_CATS[emojiCurrentCat].name;
+    picker.appendChild(catLabel);
+
+    const grid = document.createElement('div');
+    grid.className = 'emoji-grid';
+    renderEmojiGrid(grid, EMOJI_CATS[emojiCurrentCat].emojis);
+    picker.appendChild(grid);
+
+    searchInput.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const q = e.target.value.trim();
+        catLabel.textContent = q ? 'Resultados' : EMOJI_CATS[emojiCurrentCat].name;
+        renderEmojiGrid(grid, q ? EMOJI_CATS.slice(1).flatMap(c => c.emojis) : EMOJI_CATS[emojiCurrentCat].emojis);
+    });
+    searchInput.addEventListener('click', e => e.stopPropagation());
+
+    return picker;
+}
+
+if (emojiBtn) {
+    emojiBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (emojiPicker) { emojiPicker.remove(); emojiPicker = null; return; }
+        emojiPicker = buildEmojiPicker();
+        const area = document.getElementById('chat-input-area');
+        if (area) area.appendChild(emojiPicker);
     });
 }
 
