@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.4.6 - App Check activado.");
+        console.log("ChatSEK v3.4.7 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -399,15 +399,127 @@ function checkBanStatus(data) {
 function showBanScreen(title, message) {
     isUserBanned = true;
     document.body.innerHTML = `
-        <div style="background: #0f172a; height: 100vh; display: flex; align-items: center; justify-content: center; color: white; font-family: 'Inter', sans-serif; text-align: center; padding: 20px;">
-            <div style="max-width: 500px; background: #1e293b; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 0 50px rgba(244, 63, 94, 0.2);">
-                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px;"></i>
-                <h1 style="font-size: 32px; margin-bottom: 20px;">${title}</h1>
-                <p style="color: #94a3b8; font-size: 18px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
-                <button onclick="location.reload()" class="btn-login" style="width: 100%;">Reintentar conexión</button>
+        <div style="background: #ddeeff; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; padding: 20px;">
+            <div style="max-width: 500px; width: 100%; background: #fff; padding: 40px; border-radius: 20px; border: 2px solid #f43f5e; box-shadow: 0 8px 30px rgba(244,63,94,0.15); text-align: center;">
+                <i class="fas fa-gavel" style="font-size: 60px; color: #f43f5e; margin-bottom: 20px; display:block;"></i>
+                <h1 style="font-size: 28px; margin-bottom: 15px; color: #1a2a3a;">${title}</h1>
+                <p style="color: #5a7a9a; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <button id="btn-contact-admin" style="width:100%; padding:14px; background:#42A5F5; color:white; border:none; border-radius:12px; font-size:16px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                        <i class="fas fa-comment-dots"></i> Contactar con un SuperAdmin
+                    </button>
+                    <button onclick="auth.signOut().then(()=>location.reload())" style="width:100%; padding:14px; background:#f0f4f8; color:#5a7a9a; border:1px solid #b3d9ff; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                        <i class="fas fa-sign-in-alt"></i> Volver al inicio de sesión
+                    </button>
+                </div>
+
+                <!-- Mini chat con SuperAdmin -->
+                <div id="ban-chat-box" style="display:none; margin-top:24px; border:1px solid #b3d9ff; border-radius:14px; overflow:hidden; background:#f5faff;">
+                    <div style="background:#42A5F5; color:white; padding:10px 16px; font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
+                        <i class="fas fa-headset"></i> Mensaje a los SuperAdmins
+                    </div>
+                    <div id="ban-chat-messages" style="min-height:80px; max-height:200px; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px;">
+                        <div style="background:#e3f2fd; border-radius:10px; padding:10px 14px; font-size:13px; color:#1a2a3a; text-align:left;">
+                            <strong>ℹ️ Sistema:</strong> Escribe tu mensaje. Los SuperAdmins lo recibirán y podrán responderte cuando estén disponibles.
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; padding:10px; border-top:1px solid #b3d9ff; background:#fff;">
+                        <input id="ban-chat-input" type="text" placeholder="Escribe tu mensaje..." maxlength="300"
+                            style="flex:1; padding:10px 14px; border:1px solid #b3d9ff; border-radius:20px; outline:none; font-size:14px; background:#f5faff; color:#1a2a3a;" />
+                        <button id="ban-chat-send" style="padding:10px 18px; background:#42A5F5; color:white; border:none; border-radius:20px; font-weight:600; cursor:pointer; font-size:14px;">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     `;
+
+    // Toggle mini chat
+    document.getElementById('btn-contact-admin').addEventListener('click', () => {
+        const box = document.getElementById('ban-chat-box');
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        if (box.style.display === 'block') {
+            document.getElementById('ban-chat-input').focus();
+            loadBanChatMessages();
+        }
+    });
+
+    // Send message
+    document.getElementById('ban-chat-send').addEventListener('click', sendBanChatMessage);
+    document.getElementById('ban-chat-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendBanChatMessage();
+    });
+
+    async function sendBanChatMessage() {
+        const input = document.getElementById('ban-chat-input');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        input.disabled = true;
+
+        try {
+            const currentUser = auth.currentUser;
+            if (!currentUser) return;
+            const userDoc = await db.collection('users').doc(currentUser.uid).get();
+            const userData = userDoc.exists ? userDoc.data() : {};
+
+            await db.collection('messages').add({
+                text: text,
+                senderId: currentUser.uid,
+                senderName: userData.name || currentUser.email,
+                type: 'ban_appeal', // special type visible as normal message to superadmins
+                receiverId: 'superadmins', // marker for superadmin messages
+                isBanAppeal: true,
+                time: new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'}),
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Show optimistic message
+            const msgs = document.getElementById('ban-chat-messages');
+            const div = document.createElement('div');
+            div.style.cssText = 'background:#42A5F5; color:white; border-radius:10px 10px 0 10px; padding:10px 14px; font-size:13px; align-self:flex-end; max-width:85%; text-align:left;';
+            div.textContent = text;
+            msgs.appendChild(div);
+            msgs.scrollTop = msgs.scrollHeight;
+        } catch(err) {
+            console.error('Error enviando mensaje:', err);
+            const msgs = document.getElementById('ban-chat-messages');
+            const div = document.createElement('div');
+            div.style.cssText = 'background:#fee2e2; color:#b91c1c; border-radius:10px; padding:10px 14px; font-size:13px;';
+            div.textContent = 'Error al enviar. Inténtalo de nuevo.';
+            msgs.appendChild(div);
+        } finally {
+            if (document.getElementById('ban-chat-input')) {
+                document.getElementById('ban-chat-input').disabled = false;
+            }
+        }
+    }
+
+    async function loadBanChatMessages() {
+        try {
+            const currentUser = auth.currentUser;
+            if (!currentUser) return;
+            // Load previous appeals from this user
+            const snap = await db.collection('messages')
+                .where('senderId', '==', currentUser.uid)
+                .where('isBanAppeal', '==', true)
+                .get();
+            if (snap.empty) return;
+            const msgs = document.getElementById('ban-chat-messages');
+            snap.docs
+                .sort((a,b) => (a.data().timestamp?.seconds||0) - (b.data().timestamp?.seconds||0))
+                .forEach(doc => {
+                    const d = doc.data();
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background:#42A5F5; color:white; border-radius:10px 10px 0 10px; padding:10px 14px; font-size:13px; align-self:flex-end; max-width:85%; text-align:left;';
+                    div.textContent = d.text;
+                    msgs.appendChild(div);
+                });
+            msgs.scrollTop = msgs.scrollHeight;
+        } catch(e) { /* silent fail */ }
+    }
 }
 
 // --- Auth States ---
@@ -611,6 +723,137 @@ function showChatScreen() {
 
     loginScreen.classList.remove('active');
     chatScreen.classList.add('active');
+
+    // --- Ban Appeals for SuperAdmins ---
+    if (currentUserData.role === 'super_admin') {
+        setupBanAppealsListener();
+    }
+}
+
+function setupBanAppealsListener() {
+    db.collection('messages')
+        .where('isBanAppeal', '==', true)
+        .orderBy('timestamp', 'asc')
+        .onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    const data = change.doc.data();
+                    // Show as notification badge on a special "Apelaciones" contact
+                    showBanAppealNotification(data);
+                }
+            });
+        }, err => console.warn('Ban appeals listener:', err));
+}
+
+function showBanAppealNotification(data) {
+    // Show browser notification to superadmin
+    if (Notification.permission === 'granted') {
+        new Notification('⚠️ Solicitud de desbloqueo', {
+            body: `${data.senderName}: ${data.text}`,
+            icon: '/favicon.ico'
+        });
+    }
+    // Also add a special contact entry in the sidebar for ban appeals
+    let appealContact = document.getElementById('ban-appeals-contact');
+    if (!appealContact) {
+        const contactList = document.querySelector('.contact-list');
+        if (!contactList) return;
+        appealContact = document.createElement('div');
+        appealContact.id = 'ban-appeals-contact';
+        appealContact.className = 'contact-item';
+        appealContact.style.cssText = 'border-left: 3px solid #f43f5e; background: #fff5f5;';
+        appealContact.innerHTML = `
+            <div class="contact-avatar" style="background:#f43f5e; color:white; display:flex; align-items:center; justify-content:center; font-size:18px;">⚠️</div>
+            <div class="contact-info">
+                <div class="contact-name" style="color:#f43f5e; font-weight:700;">Solicitudes de desbloqueo</div>
+                <div class="contact-message" id="ban-appeal-preview">${escapeHtml(data.senderName)}: ${escapeHtml(data.text)}</div>
+            </div>
+            <span class="badge" id="ban-appeal-badge">1</span>
+        `;
+        appealContact.onclick = () => openBanAppealsPanel();
+        contactList.insertBefore(appealContact, contactList.firstChild);
+    } else {
+        // Update preview and increment badge
+        const preview = document.getElementById('ban-appeal-preview');
+        if (preview) preview.textContent = `${data.senderName}: ${data.text}`;
+        const badge = document.getElementById('ban-appeal-badge');
+        if (badge) badge.textContent = parseInt(badge.textContent || '0') + 1;
+    }
+}
+
+function openBanAppealsPanel() {
+    // Remove badge
+    const badge = document.getElementById('ban-appeal-badge');
+    if (badge) badge.textContent = '';
+
+    // Open a modal with all ban appeal messages
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;';
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:20px; width:100%; max-width:500px; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="background:#f43f5e; color:white; padding:16px 20px; font-weight:700; font-size:16px; display:flex; justify-content:space-between; align-items:center;">
+                <span>⚠️ Solicitudes de desbloqueo</span>
+                <span id="close-appeals" style="cursor:pointer; font-size:20px;">✕</span>
+            </div>
+            <div id="appeals-list" style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px;">
+                <div style="text-align:center; color:#999; font-size:14px;">Cargando...</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('close-appeals').onclick = () => modal.remove();
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+    // Load all ban appeals grouped by user
+    db.collection('messages')
+        .where('isBanAppeal', '==', true)
+        .orderBy('timestamp', 'asc')
+        .get()
+        .then(snap => {
+            const list = document.getElementById('appeals-list');
+            if (!list) return;
+            if (snap.empty) {
+                list.innerHTML = '<div style="text-align:center; color:#999; font-size:14px; padding:20px;">No hay solicitudes</div>';
+                return;
+            }
+            list.innerHTML = '';
+            // Group by sender
+            const grouped = {};
+            snap.docs.forEach(doc => {
+                const d = doc.data();
+                if (!grouped[d.senderId]) grouped[d.senderId] = { name: d.senderName, messages: [] };
+                grouped[d.senderId].messages.push(d);
+            });
+            Object.entries(grouped).forEach(([uid, group]) => {
+                const userSection = document.createElement('div');
+                userSection.style.cssText = 'border:1px solid #f43f5e; border-radius:12px; overflow:hidden;';
+                userSection.innerHTML = `
+                    <div style="background:#fff5f5; padding:10px 14px; font-weight:700; color:#f43f5e; font-size:14px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>👤 ${escapeHtml(group.name)}</span>
+                        <button onclick="window._unbanUser('${uid}', this)" style="background:#42A5F5; color:white; border:none; border-radius:8px; padding:5px 12px; cursor:pointer; font-size:12px; font-weight:600;">Desbloquear</button>
+                    </div>
+                    <div style="padding:10px 14px; display:flex; flex-direction:column; gap:6px;">
+                        ${group.messages.map(m => `<div style="background:#f8fafc; border-radius:8px; padding:8px 12px; font-size:13px; color:#1a2a3a;">${escapeHtml(m.text)} <span style="color:#999; font-size:11px; float:right;">${m.time||''}</span></div>`).join('')}
+                    </div>
+                `;
+                list.appendChild(userSection);
+            });
+        })
+        .catch(err => console.error('Error loading appeals:', err));
+
+    // Unban function
+    window._unbanUser = async (uid, btn) => {
+        btn.disabled = true;
+        btn.textContent = 'Desbloqueando...';
+        try {
+            await db.collection('users').doc(uid).update({ disabled: false, banUntil: null, strikes: 0 });
+            btn.textContent = '✅ Desbloqueado';
+            btn.style.background = '#22c55e';
+        } catch(e) {
+            btn.disabled = false;
+            btn.textContent = 'Error - reintentar';
+        }
+    };
 }
 
 // --- SEK-Time Call Logic ---
