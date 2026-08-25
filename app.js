@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.4.7 - App Check activado.");
+        console.log("ChatSEK v3.4.8 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -465,35 +465,58 @@ function showBanScreen(title, message) {
             const userDoc = await db.collection('users').doc(currentUser.uid).get();
             const userData = userDoc.exists ? userDoc.data() : {};
 
-            await db.collection('messages').add({
-                text: text,
-                senderId: currentUser.uid,
-                senderName: userData.name || currentUser.email,
-                type: 'ban_appeal', // special type visible as normal message to superadmins
-                receiverId: 'superadmins', // marker for superadmin messages
-                isBanAppeal: true,
-                time: new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'}),
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            // Buscar TODOS los super_admin activos y enviarles el mensaje individualmente
+            // Así el listener normal de mensajes lo recibe cada superadmin automáticamente,
+            // incluidos los que se añadan en el futuro.
+            const superAdminsSnap = await db.collection('users')
+                .where('role', '==', 'super_admin')
+                .get();
+
+            if (superAdminsSnap.empty) {
+                throw new Error('No hay SuperAdmins disponibles en este momento.');
+            }
+
+            const time = new Date().toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+            const batch = db.batch();
+
+            superAdminsSnap.docs.forEach(adminDoc => {
+                const ref = db.collection('messages').doc();
+                batch.set(ref, {
+                    text: text,
+                    senderId: currentUser.uid,
+                    senderName: userData.name || currentUser.email,
+                    receiverId: adminDoc.id,       // UID real del superadmin → llega a su listener
+                    type: 'text',                  // tipo normal para que se muestre como mensaje normal
+                    isBanAppeal: true,             // marca para que el superadmin sepa el contexto
+                    audioOnly: false,
+                    time: time,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
             });
 
-            // Show optimistic message
+            await batch.commit();
+
+            // Mostrar mensaje optimista en el mini chat
             const msgs = document.getElementById('ban-chat-messages');
-            const div = document.createElement('div');
-            div.style.cssText = 'background:#42A5F5; color:white; border-radius:10px 10px 0 10px; padding:10px 14px; font-size:13px; align-self:flex-end; max-width:85%; text-align:left;';
-            div.textContent = text;
-            msgs.appendChild(div);
-            msgs.scrollTop = msgs.scrollHeight;
+            if (msgs) {
+                const div = document.createElement('div');
+                div.style.cssText = 'background:#42A5F5; color:white; border-radius:10px 10px 0 10px; padding:10px 14px; font-size:13px; align-self:flex-end; max-width:85%; text-align:left;';
+                div.textContent = text;
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+            }
         } catch(err) {
             console.error('Error enviando mensaje:', err);
             const msgs = document.getElementById('ban-chat-messages');
-            const div = document.createElement('div');
-            div.style.cssText = 'background:#fee2e2; color:#b91c1c; border-radius:10px; padding:10px 14px; font-size:13px;';
-            div.textContent = 'Error al enviar. Inténtalo de nuevo.';
-            msgs.appendChild(div);
-        } finally {
-            if (document.getElementById('ban-chat-input')) {
-                document.getElementById('ban-chat-input').disabled = false;
+            if (msgs) {
+                const div = document.createElement('div');
+                div.style.cssText = 'background:#fee2e2; color:#b91c1c; border-radius:10px; padding:10px 14px; font-size:13px;';
+                div.textContent = 'Error al enviar: ' + (err.message || 'Inténtalo de nuevo.');
+                msgs.appendChild(div);
             }
+        } finally {
+            const inp = document.getElementById('ban-chat-input');
+            if (inp) inp.disabled = false;
         }
     }
 
@@ -502,6 +525,7 @@ function showBanScreen(title, message) {
             const currentUser = auth.currentUser;
             if (!currentUser) return;
             // Load previous appeals from this user
+            // Load previous appeal messages sent by this user
             const snap = await db.collection('messages')
                 .where('senderId', '==', currentUser.uid)
                 .where('isBanAppeal', '==', true)
@@ -731,14 +755,15 @@ function showChatScreen() {
 }
 
 function setupBanAppealsListener() {
+    // Listen for ban appeal messages sent to this superadmin specifically
+    // (isBanAppeal messages now use receiverId = real superadmin uid)
     db.collection('messages')
+        .where('receiverId', '==', currentUserData.uid)
         .where('isBanAppeal', '==', true)
-        .orderBy('timestamp', 'asc')
         .onSnapshot(snapshot => {
             snapshot.docChanges().forEach(change => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
-                    // Show as notification badge on a special "Apelaciones" contact
                     showBanAppealNotification(data);
                 }
             });
@@ -806,8 +831,8 @@ function openBanAppealsPanel() {
 
     // Load all ban appeals grouped by user
     db.collection('messages')
+        .where('receiverId', '==', currentUserData.uid)
         .where('isBanAppeal', '==', true)
-        .orderBy('timestamp', 'asc')
         .get()
         .then(snap => {
             const list = document.getElementById('appeals-list');
