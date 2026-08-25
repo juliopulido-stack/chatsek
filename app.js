@@ -20,7 +20,7 @@ try {
             new firebase.appCheck.ReCaptchaV3Provider('6LdyqYMsAAAAAPjGQD-PSjuIjarpCBXO-E-sw9sW'),
             true
         );
-        console.log("ChatSEK v3.3.7 - App Check activado.");
+        console.log("ChatSEK v3.4.5 - App Check activado.");
     }
 } catch (e) {
     console.error("App Check error:", e.message);
@@ -139,36 +139,32 @@ function startRecording() {
             }
         };
 
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstop = async () => {
             stream.getTracks().forEach(t => t.stop());
             stopRecordingUI();
-
-            if (recordingCancelled) return;
-            if (audioChunks.length === 0) {
-                alert("No se grabó nada. Inténtalo de nuevo.");
-                return;
-            }
-
+            if (recordingCancelled) { audioChunks = []; return; }
+            if (audioChunks.length === 0) { alert("No se grabó nada."); return; }
             const mimeUsed = mediaRecorder.mimeType || mimeType || 'audio/webm';
             const blob = new Blob(audioChunks, { type: mimeUsed });
-
-            if (blob.size > 900 * 1024) {
-                alert("⚠️ Audio demasiado largo. Máximo 30 segundos.");
-                return;
-            }
-
-            // Subir a Firebase Storage y enviar URL
-            const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.webm`;
-            const storageRef = storage.ref().child(`chat_audios/${fileName}`);
-            
-            storageRef.put(blob).then(snapshot => {
-                return snapshot.ref.getDownloadURL();
-            }).then(url => {
-                sendMessage(url, 'audio').catch(err => console.error(err));
-            }).catch(err => {
+            audioChunks = [];
+            if (blob.size < 100) { alert("Audio demasiado corto."); return; }
+            if (blob.size > 5 * 1024 * 1024) { alert("Audio demasiado grande (máx 5MB)."); return; }
+            try {
+                messageInput.placeholder = "Subiendo audio...";
+                messageInput.disabled = true;
+                const ext = mimeUsed.includes('ogg') ? 'ogg' : mimeUsed.includes('mp4') ? 'mp4' : 'webm';
+                const fileName = `audio_${Date.now()}_${auth.currentUser.uid}.${ext}`;
+                const storageRef = storage.ref().child(`chat_files/${fileName}`);
+                const snapshot = await storageRef.put(blob, { contentType: mimeUsed });
+                const url = await snapshot.ref.getDownloadURL();
+                await sendMessage(url, 'audio');
+            } catch(err) {
                 console.error("Error subiendo audio:", err);
-                alert("Error al subir la nota de voz.");
-            });
+                alert("Error al subir nota de voz: " + err.message);
+            } finally {
+                messageInput.placeholder = "Escribe un mensaje";
+                messageInput.disabled = false;
+            }
         };
 
         mediaRecorder.start(250); // chunk cada 250ms — más fiable
@@ -199,7 +195,10 @@ function startRecordingUI() {
         const s = recordingSeconds % 60;
         recordingTimerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
         // Límite de 30 segundos
-        if (recordingSeconds >= 30) stopRecording(false);
+        if (recordingSeconds >= 30) {
+            clearInterval(recordingTimerInterval);
+            stopRecording(false);
+        }
     }, 1000);
 }
 
@@ -1014,6 +1013,9 @@ function setupGroupsListener() {
             });
             // Keep the group-messages listener (in setupMessagesListener) in sync
             // with the current list of groups the user belongs to.
+            if (typeof window._resubscribeGroupMessages === 'function') {
+                window._resubscribeGroupMessages();
+            }
             if (typeof window._resubscribeGroupMessages === 'function') {
                 window._resubscribeGroupMessages();
             }
@@ -2064,130 +2066,33 @@ if (contactSearchInput) {
         renderContacts(e.target.value.toLowerCase());
     });
 }
-// --- Full Emoji Picker ---
-const EMOJI_CATS = [
-    { name:'Recientes', icon:'🕐', emojis:[] },
-    { name:'Caras', icon:'😀', emojis:['😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','🥰','😘','😗','😙','😚','🙂','🤗','🤩','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌','😛','😜','😝','🤤','😒','😔','😞','😟','😠','😡','🤬','😤','😢','😭','😩','🥺','😲','😳','🥵','🥶','😱','😨','😰','😓','😬','🤫','🥸','🤓','🥳','😇','🤠','🤡','🥹','🙃','🫠','🫡','🫤','🤯','😵','🥴','😷','🤒','🤕','🤢','🤮','🤧','😈','👿','💀','☠️','💩','👹','👺','👻','👽','👾','🤖'] },
-    { name:'Gestos', icon:'👋', emojis:['👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛','🤜','👏','🫶','🙌','👐','🤲','🙏','✍️','💅','🤳','💪','🦾','🦵','🦶','👂','🦻','👃','👀','👁️','👅','👄','💋'] },
-    { name:'Personas', icon:'👨', emojis:['👶','🧒','👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵','🙍','🙎','🙅','🙆','💁','🙋','🧏','🙇','🤦','🤷','👮','🕵️','💂','🥷','👷','🤴','👸','👳','👲','🧕','🤵','👰','🤰','🤱','👼','🎅','🤶','🦸','🦹','🧙','🧚','🧛','🧜','🧝','🧞','🧟','💆','💇','🚶','🧍','🧎','🏃','💃','🕺','👫','👬','👭','💏','💑','👪'] },
-    { name:'Animales', icon:'🐶', emojis:['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷️','🦂','🐢','🐍','🦎','🐙','🦑','🦐','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐕','🐩','🐈','🐓','🦃','🦚','🦜','🦢','🕊️','🐇','🦝','🦨','🦦','🦥','🐁','🐀','🐿️','🦔','🐾','🌵','🎄','🌲','🌳','🌴','🌱','🌿','☘️','🍀','🍃','🍂','🍁','🍄','🌾','💐','🌷','🌹','🌺','🌸','🌼','🌻'] },
-    { name:'Comida', icon:'🍕', emojis:['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🧀','🥚','🍳','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🥪','🥙','🌮','🌯','🥗','🥘','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🍤','🍙','🍚','🍘','🍥','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🍯','🧃','🥤','🧋','☕','🫖','🍵','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🍾','🧊'] },
-    { name:'Actividades', icon:'⚽', emojis:['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🏓','🏸','🏒','🥊','🥋','🎽','🛹','🛼','🛷','⸻','🥌','🎿','⛷️','🏂','🏋️','🤼','🤸','⛹️','🤺','🧘','🏊','🏄','🚣','🧗','🚵','🚴','🏆','🥇','🥈','🥉','🏅','🎖️','🎪','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎺','🎸','🎻','🎲','♟️','🎯','🎳','🎮','🎰','🧩','🧸','🎉','🎊','🎈','🎀','🎁','🎗️'] },
-    { name:'Viajes', icon:'🚗', emojis:['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🚲','🛴','🛹','⚓','⛵','🚤','🛥️','🛳️','🚢','✈️','🛩️','💺','🚁','🚀','🛸','🌍','🌎','🌏','🗺️','🧭','🏔️','⛰️','🌋','🏕️','🏖️','🏜️','🏝️','🏟️','🏛️','🏗️','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','⛪','🕌','⛲','⛺','🌁','🌃','🏙️','🌄','🌅','🌆','🌇','🌉','🎠','🎡','🎢'] },
-    { name:'Objetos', icon:'💡', emojis:['⌚','📱','💻','⌨️','🖥️','🖨️','🖱️','💾','💿','📀','📷','📸','📹','🎥','📞','☎️','📺','📻','🧭','⏰','🕰️','⌛','⏳','📡','🔋','🔌','💡','🔦','🕯️','🧯','💸','💵','💴','💶','💷','💰','💳','💎','⚖️','🧲','🔧','🔩','⚙️','🔗','🧰','🔨','⚒️','🛠️','🔪','⚔️','🛡️','🔮','🪄','🔐','🔏','🔒','🔓','🔑','🗝️','📝','✏️','🖊️','📖','📚','📰','📋','📁','📂','📅','📌','📍','📎','✂️','🗑️','🔎','🔍','🔭','🔬','🩺','💊','💉','🧬','🦠','🧪','🧫','🧲','🪞','🪟','🛋️','🪑','🚿','🛁','🪠','🧹','🧺','🧻','🪣','🧼','🫧','🧽','🧴','🛒'] },
-    { name:'Símbolos', icon:'❤️', emojis:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','☢️','☣️','📴','📳','✴️','🆚','♻️','✅','❌','⭕','🛑','⛔','🚫','💯','💢','♨️','❗','❕','❓','❔','‼️','⁉️','🔴','🟠','🟡','🟢','🔵','🟣','🟤','⚫','⚪','🟥','🟧','🟨','🟩','🟦','🟪','🟫','⬛','⬜','▪️','▫️','🔶','🔷','🔸','🔹','🔺','🔻','💠','🔘','🔳','🔲','🏧','🚾','♿','🅿️','🈳','🈹','🈵','🉑','🈶','🈚','🈸','🈺','🈷️','🆘','🆎','🆑','🅾️','🆒','🆓','🆕','🆙','🆗','🆙','🔅','🔆','📶','🏁','🚩','🎌','🏴','🏳️'] },
-];
-
-let emojiRecentList = JSON.parse(localStorage.getItem('emojiRecent') || '[]');
-let emojiCurrentCat = 1;
-
-function saveRecentEmoji(emoji) {
-    emojiRecentList = [emoji, ...emojiRecentList.filter(e => e !== emoji)].slice(0, 30);
-    localStorage.setItem('emojiRecent', JSON.stringify(emojiRecentList));
-    EMOJI_CATS[0].emojis = emojiRecentList;
-}
-
-function buildEmojiPicker() {
-    EMOJI_CATS[0].emojis = emojiRecentList;
-    const picker = document.createElement('div');
-    picker.className = 'emoji-picker';
-    picker.id = 'emoji-picker-full';
-
-    // Search bar
-    const searchBar = document.createElement('div');
-    searchBar.className = 'emoji-search-bar';
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = '🔍 Buscar emoji...';
-    searchInput.className = 'emoji-search-input';
-    searchBar.appendChild(searchInput);
-    picker.appendChild(searchBar);
-
-    // Category tabs
-    const tabs = document.createElement('div');
-    tabs.className = 'emoji-tabs';
-    EMOJI_CATS.forEach((cat, i) => {
-        const tab = document.createElement('span');
-        tab.className = 'emoji-tab' + (i === emojiCurrentCat ? ' active' : '');
-        tab.textContent = cat.icon;
-        tab.title = cat.name;
-        tab.onclick = (e) => {
-            e.stopPropagation();
-            emojiCurrentCat = i;
-            document.querySelectorAll('.emoji-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            searchInput.value = '';
-            renderEmojiGrid(grid, EMOJI_CATS[i].emojis);
-        };
-        tabs.appendChild(tab);
-    });
-    picker.appendChild(tabs);
-
-    // Category label
-    const catLabel = document.createElement('div');
-    catLabel.className = 'emoji-cat-label';
-    catLabel.textContent = EMOJI_CATS[emojiCurrentCat].name;
-    picker.appendChild(catLabel);
-
-    // Grid
-    const grid = document.createElement('div');
-    grid.className = 'emoji-grid';
-    renderEmojiGrid(grid, EMOJI_CATS[emojiCurrentCat].emojis);
-    picker.appendChild(grid);
-
-    // Search logic
-    searchInput.addEventListener('input', (e) => {
-        e.stopPropagation();
-        const q = e.target.value.trim();
-        if (q === '') {
-            catLabel.textContent = EMOJI_CATS[emojiCurrentCat].name;
-            renderEmojiGrid(grid, EMOJI_CATS[emojiCurrentCat].emojis);
-        } else {
-            catLabel.textContent = 'Resultados';
-            const all = EMOJI_CATS.slice(1).flatMap(c => c.emojis);
-            renderEmojiGrid(grid, all);
-        }
-    });
-
-    searchInput.addEventListener('click', e => e.stopPropagation());
-
-    return picker;
-}
-
-function renderEmojiGrid(grid, emojis) {
-    grid.innerHTML = '';
-    if (!emojis || emojis.length === 0) {
-        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:20px;color:#888;font-size:13px;">Sin emojis recientes</div>';
-        return;
-    }
-    emojis.forEach(emoji => {
-        const span = document.createElement('span');
-        span.className = 'emoji-item';
-        span.textContent = emoji;
-        span.onclick = (e) => {
-            e.stopPropagation();
-            if (messageInput) {
-                messageInput.value += emoji;
-                messageInput.focus();
-                messageInput.dispatchEvent(new Event('input'));
-            }
-            saveRecentEmoji(emoji);
-        };
-        grid.appendChild(span);
-    });
-}
-
 if (emojiBtn) {
-    emojiBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
+    emojiBtn.addEventListener('click', () => {
         if (emojiPicker) {
             emojiPicker.remove();
             emojiPicker = null;
             return;
         }
-        emojiPicker = buildEmojiPicker();
-        const area = document.getElementById('chat-input-area');
-        if (area) area.appendChild(emojiPicker);
+
+        emojiPicker = document.createElement('div');
+        emojiPicker.className = 'emoji-picker';
+
+        const emojis = ["😀", "😂", "🥰", "😍", "😎", "🤔", "😜", "😇", "🥳", "😭", "👍", "❤️", "🔥", "✨", "🙌", "🙏", "🚀", "🎉"];
+
+        emojis.forEach(emoji => {
+            const span = document.createElement('span');
+            span.className = 'emoji-item';
+            span.textContent = emoji;
+            span.onclick = () => {
+                messageInput.value += emoji;
+                messageInput.focus();
+                // Trigger input event to show send button if needed
+                messageInput.dispatchEvent(new Event('input'));
+            };
+            emojiPicker.appendChild(span);
+        });
+
+        document.getElementById('chat-input-area').appendChild(emojiPicker);
     });
 }
 
